@@ -1,0 +1,41 @@
+---
+title: OneChain Integration
+---
+
+# OneChain Integration Notes
+
+The official OneLabs developer documentation indicates that OneChain uses a
+`Move`-centric development flow and a CLI called `one`.
+
+## Public networks
+
+- Mainnet RPC: `https://rpc-mainnet.onelabs.cc:443`
+- Testnet RPC: `https://rpc-testnet.onelabs.cc:443`
+- Devnet RPC: `https://rpc-devnet.onelabs.cc:443`
+- Testnet faucet: `https://faucet-testnet.onelabs.cc:443`
+- Devnet faucet: `https://faucet-devnet.onelabs.cc:443`
+
+## Local developer flow
+
+```bash
+cargo install --locked --git https://github.com/one-chain-labs/onechain.git one --features tracing
+one client new-env --alias testnet --rpc https://rpc-testnet.onelabs.cc:443
+one client switch --env testnet
+one move build
+one move test
+one client publish
+```
+
+## Project assumptions
+
+This repository currently defaults to **testnet** because it provides a public
+RPC and a public faucet, which makes it the safest starting point for
+development.
+
+If you want to switch the workspace to devnet or mainnet later, update:
+
+- `ONECHAIN_NETWORK`
+- `ONECHAIN_RPC_URL`
+- `ONECHAIN_FAUCET_URL`
+
+The backend already exposes these values to the client through `/api/config`.

@@ -1,0 +1,11 @@
+{
+  "name": "@nft-dnd/contracts",
+  "private": true,
+  "scripts": {
+    "dev": "echo 'Use `pnpm --dir contracts deploy:testnet` or `one move test` inside this package.'",
+    "build": "mkdir -p dist && printf 'Build Move packages with `one move build` inside contracts.\\n' > dist/README.txt",
+    "check": "echo 'Validate Move package with `one move test` inside contracts.'",
+    "deploy:testnet": "sh scripts/deploy.sh testnet",
+    "deploy:devnet": "sh scripts/deploy.sh devnet"
+  }
+}

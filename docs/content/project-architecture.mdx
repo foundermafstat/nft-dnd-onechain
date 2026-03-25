@@ -1,0 +1,67 @@
+---
+title: Project Architecture
+---
+
+# Project Architecture
+
+NFT-DND is a procedural real-time multiplayer RPG with a browser client. Core
+gameplay systems such as lore, quest structure, NPC behavior, and legendary
+loot are generated or adjusted by an AI Dungeon Master pipeline.
+
+## AI orchestration
+
+The AI layer is modeled as a distributed pipeline:
+
+- **LLM core** generates lore, dialogue branches, and quest framing.
+- **Narrative director** manages party context, pacing, and memory.
+- **Adaptive difficulty engine** tunes encounters based on damage output,
+  completion speed, and gear score.
+- **World state tracker** manages spatial state, triggers, and live NPC state.
+- **Loot and lore minting service** creates metadata for rare and legendary
+  rewards and prepares on-chain publishing data.
+
+## Real-time world systems
+
+The game world is a lightweight top-down 2D environment rendered in the browser
+while remaining server-authoritative.
+
+- The map is a procedural tile or hex grid.
+- Biomes, threat level, resource density, and magical modifiers shape content.
+- Multiplayer synchronization is designed around WebSockets.
+- Encounter pacing is adjusted through periodic world and party ticks.
+
+## OneChain integration
+
+The blockchain layer is now based on **OneChain**, not Stellar.
+
+### What belongs on-chain
+
+- Legendary or unique loot objects
+- Chronicle-style world history records
+- Seasonal badges and achievement artifacts
+- Shared campaign milestones that need trust-minimized verification
+
+### What stays off-chain
+
+- High-frequency combat events
+- positional updates
+- temporary AI state
+- cheap crafting materials and volatile inventory state
+
+### Smart contract direction
+
+The repository now includes a `Move` package inside `contracts/`. That package
+is intended to evolve into:
+
+- a registry for rare loot minting
+- chronicle badge issuance
+- event emission for major world decisions
+
+## Multiplayer and content generation
+
+- Parties are designed for 1 to 5 players.
+- Combat behavior can combine finite-state and behavior-tree logic.
+- AI-generated quests follow a formal graph:
+  Goal -> Obstacle -> Mini-boss -> Branch -> Main boss -> Reward
+- Adaptive content generation is capped by procedural templates to avoid
+  balance-breaking hallucinations.

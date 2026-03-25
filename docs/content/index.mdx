@@ -1,0 +1,27 @@
+---
+title: Overview
+---
+
+# NFT-DND on OneChain
+
+This workspace contains the first monorepo pass for the NFT-DND concept:
+
+- `client` uses **Next.js 16**
+- `docs` uses **Nextra**
+- `server` uses **Express.js**
+- `contracts` uses **Move** for **OneChain**
+
+## Why the blockchain migration changed
+
+The original concept referenced Stellar and Soroban. This repository is now
+aligned with the public OneChain developer flow published by OneLabs:
+
+- public RPC endpoints at `https://rpc-<network>.onelabs.cc:443`
+- a `Move`-based smart contract workflow
+- the `one` CLI for build, environment switching, and publishing
+
+## Documentation pages
+
+- [Project Architecture](/project-architecture)
+- [Map Generator Rules](/map-generator-rules)
+- [OneChain Integration](/onechain-integration)

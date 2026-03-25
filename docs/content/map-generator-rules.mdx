@@ -1,0 +1,41 @@
+---
+title: Map Generator Rules
+---
+
+# AI Map Generation Rules
+
+When creating or expanding location maps for NFT-DND on OneChain, the AI level
+generator should follow these rules:
+
+## Non-rectangular, organic spaces
+
+Avoid perfectly rectangular rooms in wilderness, caverns, and ruins unless the
+fiction explicitly calls for formal architecture.
+
+- Pad the outer border with impassable terrain.
+- Use asymmetric silhouettes and uneven edges.
+- Keep the playable outline visually natural.
+
+## Preserve transition geometry
+
+Map connections must align across zones.
+
+- Exit width must match entrance width exactly.
+- Directional placement should stay consistent.
+- Paths should visually continue across zone boundaries.
+
+## Always define exits
+
+Connected maps should never leave the exits array empty.
+
+- Every exit must include target location metadata.
+- Every exit should reference a valid spawn label.
+- Spawn labels must match the destination spawn-point definitions exactly.
+
+## Build visual theming into the grid
+
+Maps should not degrade into a plain floor-versus-wall pattern.
+
+- Scatter props such as campfires, rugs, crates, or barrels.
+- Use pathing tiles such as cobblestone and bridges where it improves clarity.
+- Let biome flavor show up directly in the layout, not only in descriptions.
