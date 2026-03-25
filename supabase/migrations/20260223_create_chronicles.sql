@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS public.campaign_chronicles (
     
     event_type TEXT NOT NULL CHECK (event_type IN ('COMBAT_VICTORY', 'PUZZLE_SOLVED', 'NPC_INTERACTION', 'STORY_MILESTONE', 'TRAP_TRIGGERED')),
     narrative TEXT NOT NULL,
-    on_chain_hash TEXT NULL, -- SHA256 hash sent to Soroban adventure_vault
+    on_chain_hash TEXT NULL, -- SHA256 hash sent to OneChain adventure_vault
     
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );

@@ -3,3 +3,4 @@ packages:
   - docs
   - server
   - contracts
+  - shared

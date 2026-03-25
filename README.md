@@ -6,6 +6,7 @@ This repository is now organized as a `pnpm` workspace powered by Turborepo. It 
 - `docs` — a `Nextra` documentation site.
 - `server` — an `Express.js` backend.
 - `contracts` — a `Move` package for OneChain deployment.
+- `shared` — shared gameplay models and constants used by the client and server.
 
 ## Getting started
 
