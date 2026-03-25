@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Cinzel, Inter } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/context/AuthContext";
+import { OnechainProviders } from "@/components/OnechainProviders";
 
 const cinzel = Cinzel({
   variable: "--font-cinzel",
@@ -17,7 +18,7 @@ const inter = Inter({
 
 export const metadata: Metadata = {
   title: "NFT-DND — Forge Your Legacy",
-  description: "An elite procedural fantasy RPG governed by an AI Game Master and adapted for OneChain.",
+  description: "An elite procedural fantasy RPG governed by an AI Game Master, connected through OneWallet on OneChain testnet.",
 };
 
 export default function RootLayout({
@@ -30,9 +31,11 @@ export default function RootLayout({
       <body
         className={`${cinzel.variable} ${inter.variable} antialiased`}
       >
-        <AuthProvider>
-          {children}
-        </AuthProvider>
+        <OnechainProviders>
+          <AuthProvider>
+            {children}
+          </AuthProvider>
+        </OnechainProviders>
       </body>
     </html>
   );

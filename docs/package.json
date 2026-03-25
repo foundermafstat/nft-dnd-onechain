@@ -2,9 +2,9 @@
   "name": "@nft-dnd/docs",
   "private": true,
   "scripts": {
-    "dev": "next dev --port 3001",
+    "dev": "sh -c 'next dev --port ${DOCS_PORT:-3001}'",
     "build": "next build",
-    "start": "next start --port 3001",
+    "start": "sh -c 'next start --port ${DOCS_PORT:-3001}'",
     "check": "tsc --noEmit"
   },
   "dependencies": {

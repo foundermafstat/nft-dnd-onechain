@@ -1,6 +1,8 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { useCurrentAccount, useCurrentWallet, useDisconnectWallet } from '@mysten/dapp-kit';
+import { SERVER_URL } from '@/lib/config';
 
 interface AuthContextType {
     playerId: string | null;
@@ -22,11 +24,13 @@ const STORAGE_KEY = 'nft-dnd-player-id';
 const WALLET_KEY = 'nft-dnd-wallet-address';
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
+    const account = useCurrentAccount();
+    const { currentWallet } = useCurrentWallet();
+    const { mutate: disconnectWallet } = useDisconnectWallet();
     const [playerId, setPlayerIdState] = useState<string | null>(null);
     const [walletAddress, setWalletAddressState] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(true);
 
-    // On mount: restore from localStorage
     useEffect(() => {
         try {
             const storedId = localStorage.getItem(STORAGE_KEY);
@@ -39,7 +43,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setIsLoading(false);
     }, []);
 
-    // Persist to localStorage when auth changes
     const setAuth = useCallback((id: string | null, wallet: string | null) => {
         setPlayerIdState(id);
         setWalletAddressState(wallet);
@@ -52,15 +55,61 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         } catch { }
     }, []);
 
-    // Explicit logout: clear storage + state
     const logout = useCallback(() => {
-        setPlayerIdState(null);
-        setWalletAddressState(null);
-        try {
-            localStorage.removeItem(STORAGE_KEY);
-            localStorage.removeItem(WALLET_KEY);
-        } catch { }
-    }, []);
+        setAuth(null, null);
+        disconnectWallet(undefined, {
+            onError: (error) => {
+                console.error('Wallet disconnect failed.', error);
+            },
+        });
+    }, [disconnectWallet, setAuth]);
+
+    useEffect(() => {
+        let cancelled = false;
+
+        if (isLoading) {
+            return;
+        }
+
+        if (!account || !currentWallet) {
+            setAuth(null, null);
+            return;
+        }
+
+        const syncWalletSession = async () => {
+            try {
+                const response = await fetch(`${SERVER_URL}/api/auth/wallet`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        publicKey: account.address,
+                        walletName: currentWallet.name || 'OneWallet',
+                    }),
+                });
+
+                if (!response.ok) {
+                    throw new Error('Failed to sync wallet session with the server.');
+                }
+
+                const { player } = await response.json();
+
+                if (!cancelled) {
+                    setAuth(player.id, account.address);
+                }
+            } catch (error) {
+                console.error('Wallet auth sync failed.', error);
+                if (!cancelled) {
+                    setAuth(null, account.address);
+                }
+            }
+        };
+
+        void syncWalletSession();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [account, currentWallet, isLoading, setAuth]);
 
     return (
         <AuthContext.Provider value={{ playerId, walletAddress, setAuth, logout, isLoading }}>

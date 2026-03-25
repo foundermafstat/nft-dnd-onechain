@@ -2,9 +2,9 @@
   "name": "@nft-dnd/client",
   "private": true,
   "scripts": {
-    "dev": "next dev --port 3000",
+    "dev": "sh -c 'next dev --port ${CLIENT_PORT:-3000}'",
     "build": "next build",
-    "start": "next start --port 3000",
+    "start": "sh -c 'next start --port ${CLIENT_PORT:-3000}'",
     "check": "tsc --noEmit"
   },
   "dependencies": {
@@ -13,10 +13,16 @@
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
     "@hookform/resolvers": "^5.2.2",
+    "@mysten/dapp-kit": "^0.14.53",
+    "@mysten/sui": "^1.45.2",
+    "@mysten/wallet-standard": "^0.12.14",
+    "@onelabs/dapp-kit": "0.15.6",
+    "@onelabs/sui": "1.26.2",
     "@react-three/cannon": "^6.6.0",
     "@react-three/drei": "^10.7.7",
     "@react-three/fiber": "^9.5.0",
     "@supabase/supabase-js": "^2.97.0",
+    "@tanstack/react-query": "^5.95.2",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",

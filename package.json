@@ -3,7 +3,7 @@
   "private": true,
   "packageManager": "pnpm@10.30.0",
   "scripts": {
-    "dev": "turbo dev",
+    "dev": "node scripts/dev.mjs",
     "build": "turbo build",
     "check": "turbo check",
     "clean": "turbo clean"
