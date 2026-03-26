@@ -152,10 +152,10 @@ export default function DndInterface({ playerId, walletAddress }: DndInterfacePr
                 <div className="pointer-events-none absolute inset-0 opacity-40 [background-image:linear-gradient(rgba(255,255,255,0.025)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.025)_1px,transparent_1px)] [background-size:72px_72px]" />
 
                 {/* Resizable Workspaces */}
-                <ResizablePanelGroup direction="horizontal" className="relative z-10 flex-1 h-full w-full">
+                <ResizablePanelGroup direction="horizontal" className="relative z-10 flex-1 h-full w-full justify-end">
 
                     {/* Left Panel: Game Canvas Area */}
-                    <ResizablePanel defaultSize={60} minSize={30} className="relative h-full flex flex-col bg-[#050505]">
+                    <ResizablePanel defaultSize={60} minSize={20} className="relative h-full flex flex-col min-w-[350px] bg-[#050505] overflow-hidden">
                         <div className="pointer-events-none absolute inset-0 z-0 bg-[radial-gradient(circle_at_center,rgba(255,255,255,0.04),transparent_48%),linear-gradient(180deg,rgba(255,255,255,0.02),transparent_16%,transparent_84%,rgba(255,255,255,0.02))]" />
 
                         {/* The 3D Canvas */}
@@ -193,7 +193,7 @@ export default function DndInterface({ playerId, walletAddress }: DndInterfacePr
                     <ResizableHandle withHandle className="relative z-20 w-2 bg-transparent transition-all before:absolute before:inset-y-0 before:left-1/2 before:w-px before:-translate-x-1/2 before:bg-gradient-to-b before:from-transparent before:via-amber-600/60 before:to-transparent hover:before:via-amber-300/80" />
 
                     {/* Right Panel: Interaction & Chat */}
-                    <ResizablePanel defaultSize={40} minSize={25} className="relative h-full flex flex-col border-l border-amber-900/20 bg-[linear-gradient(180deg,rgba(18,15,13,0.98)_0%,rgba(12,10,9,0.98)_100%)] shadow-[-20px_0_60px_rgba(0,0,0,0.72)]">
+                    <ResizablePanel defaultSize={40} minSize={20} className="relative h-full flex flex-col min-w-[350px] border-l border-amber-900/20 bg-[linear-gradient(180deg,rgba(18,15,13,0.98)_0%,rgba(12,10,9,0.98)_100%)] shadow-[-20px_0_60px_rgba(0,0,0,0.72)]">
                         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(245,158,11,0.08),transparent_26%),linear-gradient(180deg,rgba(255,255,255,0.02),transparent_18%,transparent_82%,rgba(255,255,255,0.02))]" />
                         <InteractionPanel triggerRoll={triggerRoll} />
                     </ResizablePanel>

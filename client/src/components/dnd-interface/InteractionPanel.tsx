@@ -186,7 +186,7 @@ export default function InteractionPanel({ triggerRoll }: InteractionPanelProps)
 	};
 
 	return (
-		<div className="relative flex h-full w-full flex-col overflow-hidden">
+		<div className="relative flex h-full w-full min-w-[350px] flex-col overflow-hidden">
 			<div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(214,169,90,0.08),transparent_22%),radial-gradient(circle_at_bottom,rgba(114,132,154,0.08),transparent_28%),linear-gradient(180deg,rgba(255,255,255,0.02),transparent_18%,transparent_82%,rgba(255,255,255,0.02))]" />
 
 			{/* 1. Chat History (Scrollable, takes up remaining space) */}
