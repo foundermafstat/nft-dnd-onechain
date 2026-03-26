@@ -5,3 +5,4 @@ export * from './models/location';
 export * from './models/combat';
 export * from './models/rules';
 export * from './models/scenario';
+export * from './models/onchain';

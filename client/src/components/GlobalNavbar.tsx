@@ -2,7 +2,8 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Compass, LogOut, ScrollText, Shield, Store, Wallet } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Compass, Copy, LogOut, ScrollText, Shield, Store, User, Wallet } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/context/AuthContext';
 import {
@@ -24,14 +25,32 @@ const links = [
 export default function GlobalNavbar() {
   const pathname = usePathname();
   const { playerId, walletAddress, isLoading, logout } = useAuth();
+  const [copied, setCopied] = useState(false);
 
-  if (isLoading || !playerId) {
-    return null;
-  }
+  useEffect(() => {
+    if (!copied) return;
+    const timer = window.setTimeout(() => setCopied(false), 1200);
+    return () => window.clearTimeout(timer);
+  }, [copied]);
+
+  const copyAddress = async () => {
+    if (!walletAddress) return;
+    try {
+      await navigator.clipboard.writeText(walletAddress);
+      setCopied(true);
+    } catch (error) {
+      console.error('Failed to copy wallet address.', error);
+      setCopied(false);
+    }
+  };
 
   const shortWallet = walletAddress
     ? `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}`
     : playerId;
+
+  if (isLoading || !playerId) {
+    return null;
+  }
 
   return (
     <header className="relative z-50 shrink-0 border-b border-white/7 bg-[linear-gradient(180deg,rgba(13,13,15,0.96),rgba(8,8,10,0.92))] p-2 backdrop-blur-2xl md:px-4">
@@ -79,9 +98,32 @@ export default function GlobalNavbar() {
               Wallet Session
             </DropdownMenuLabel>
             <div className="rounded-lg border border-white/7 bg-white/[0.02] px-2.5 py-2 text-[0.74rem] text-stone-300">
-              {walletAddress || playerId}
+              <div className="flex items-center justify-between gap-2">
+                <span className="truncate">{shortWallet}</span>
+                <button
+                  type="button"
+                  onClick={copyAddress}
+                  className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-white/12 bg-white/[0.02] text-stone-400 transition-colors hover:border-amber-300/40 hover:text-amber-100"
+                  aria-label="Copy wallet address"
+                  title="Copy wallet address"
+                >
+                  <Copy className="h-3.5 w-3.5" />
+                </button>
+              </div>
+              <p className="mt-1 truncate text-[0.62rem] text-stone-500">{walletAddress || playerId}</p>
             </div>
+            {copied && (
+              <p className="px-2.5 pt-1 text-[0.62rem] uppercase tracking-[0.16em] text-emerald-300">
+                Address copied
+              </p>
+            )}
             <DropdownMenuSeparator className="my-1 bg-white/8" />
+            <DropdownMenuItem asChild className="cursor-pointer rounded-md text-[0.72rem] text-stone-200 focus:bg-white/6 focus:text-amber-100">
+              <Link href="/account">
+                <User className="mr-2 h-3.5 w-3.5" />
+                Account
+              </Link>
+            </DropdownMenuItem>
             <DropdownMenuItem
               onClick={logout}
               className="cursor-pointer rounded-md text-[0.72rem] text-red-300 focus:bg-red-950/25 focus:text-red-200"

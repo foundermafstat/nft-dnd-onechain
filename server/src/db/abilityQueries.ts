@@ -110,6 +110,38 @@ export async function getAbilityBySlug(slug: string): Promise<AbilityData | null
     return data;
 }
 
+export async function getAbilitiesForProfile(
+    heroClass: string,
+    ancestry: string,
+    options?: {
+        includeTypes?: string[];
+    },
+): Promise<AbilityData[]> {
+    const includeTypes = options?.includeTypes || ['ancestry_feature', 'class_feature', 'talent', 'skill'];
+    const { data, error } = await supabase
+        .from('abilities')
+        .select('*')
+        .eq('is_template', true)
+        .in('ability_type', includeTypes)
+        .order('ability_type')
+        .order('tier')
+        .order('name');
+
+    if (error) {
+        console.error('Error fetching profile abilities:', error);
+        return [];
+    }
+
+    return (data || []).filter((ability) => {
+        const classRestriction = Array.isArray(ability.class_restriction) ? ability.class_restriction : [];
+        const ancestryRestriction = Array.isArray(ability.ancestry_restriction) ? ability.ancestry_restriction : [];
+
+        const classAllowed = classRestriction.length === 0 || classRestriction.includes(heroClass);
+        const ancestryAllowed = ancestryRestriction.length === 0 || ancestryRestriction.includes(ancestry);
+        return classAllowed && ancestryAllowed;
+    });
+}
+
 // ── Character ability management ───────────────────────────────────
 
 export async function learnAbility(

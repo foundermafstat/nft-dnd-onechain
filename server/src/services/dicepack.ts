@@ -1,4 +1,5 @@
 import { createHash, randomBytes, randomInt } from 'crypto';
+import { onechainContractMeta, onechainEntryTargets } from './onechainContract';
 
 type DicePackRole = 'player' | 'ai';
 
@@ -30,6 +31,7 @@ interface AdventureDiceSession {
 
 export interface StartDiceSessionInput {
     playerAddress: string;
+    adventureId?: number;
     playerRollsCount?: number;
     aiRollsCount?: number;
 }
@@ -49,6 +51,12 @@ export interface StartDiceSessionOutput {
         remainingRolls: number;
         merkleRootHex: string;
     };
+    onchain: {
+        packageId: string;
+        registryObjectId: string;
+        createDicePacksTarget: string;
+        consumeDiceRollTarget: string;
+    };
 }
 
 export interface ConsumeRollOutput {
@@ -60,6 +68,9 @@ export interface ConsumeRollOutput {
     roll: number;
     remainingRolls: number;
     relayerTxHash: string;
+    target: string;
+    packageId: string;
+    registryObjectId: string;
 }
 
 const DEFAULT_PLAYER_ROLLS = 64;
@@ -174,8 +185,15 @@ class DicepackService {
             throw new Error('playerAddress is required');
         }
 
-        const sessionId = this.nextSessionId;
-        this.nextSessionId += 1;
+        const requestedAdventureId = Number(input.adventureId);
+        const hasRequestedAdventureId =
+            Number.isInteger(requestedAdventureId) && requestedAdventureId > 0;
+
+        const sessionId = hasRequestedAdventureId ? requestedAdventureId : this.nextSessionId;
+        if (this.sessions.has(sessionId)) {
+            throw new Error(`Adventure session ${sessionId} already exists`);
+        }
+        this.nextSessionId = Math.max(this.nextSessionId + 1, sessionId + 1);
 
         const playerPack = createPack(sessionId, 'player', input.playerRollsCount ?? DEFAULT_PLAYER_ROLLS);
         const aiPack = createPack(sessionId, 'ai', input.aiRollsCount ?? DEFAULT_AI_ROLLS);
@@ -205,6 +223,12 @@ class DicepackService {
                 totalRolls: aiPack.totalRolls,
                 remainingRolls: aiPack.totalRolls,
                 merkleRootHex: aiPack.merkleRootHex,
+            },
+            onchain: {
+                packageId: onechainContractMeta.packageId,
+                registryObjectId: onechainContractMeta.registryObjectId,
+                createDicePacksTarget: onechainEntryTargets.createAdventureDicePacks,
+                consumeDiceRollTarget: onechainEntryTargets.consumeDicepackRoll,
             },
         };
     }
@@ -261,6 +285,9 @@ class DicepackService {
             roll,
             remainingRolls: pack.totalRolls - pack.usedRolls,
             relayerTxHash: `relayer-dice-${sessionId}-${role}-${rollIndex}-${Date.now()}`,
+            target: onechainEntryTargets.consumeDicepackRoll,
+            packageId: onechainContractMeta.packageId,
+            registryObjectId: onechainContractMeta.registryObjectId,
         };
     }
 

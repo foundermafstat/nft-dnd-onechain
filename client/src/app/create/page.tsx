@@ -8,6 +8,7 @@ import { useAuth } from '@/context/AuthContext';
 import { SERVER_URL } from '@/lib/config';
 import { mintHeroSBT } from '@/lib/OneChain';
 import { quoteHeroMintCost } from '@/lib/onechainEconomy';
+import { useOnechainWalletExecutor } from '@/hooks/useOnechainWalletExecutor';
 import {
   type Alignment,
   COMMON_LANGUAGES,
@@ -86,6 +87,7 @@ function StatRow({
 export default function CreateHeroPage() {
   const router = useRouter();
   const { playerId, walletAddress, isLoading } = useAuth();
+  const { executor, isExecuting: isWalletExecuting } = useOnechainWalletExecutor();
 
   const [name, setName] = useState('');
   const [selectedAncestry, setSelectedAncestry] = useState<Ancestry>(Ancestry.Human);
@@ -255,6 +257,10 @@ export default function CreateHeroPage() {
       alert('Connect wallet before forging your hero soulbound token.');
       return;
     }
+    if (!executor) {
+      alert('Wallet signer not available. Reconnect OneWallet and try again.');
+      return;
+    }
 
     let baseHp = 4;
     if (selectedClass === HeroClass.Fighter) baseHp = 8;
@@ -307,7 +313,7 @@ export default function CreateHeroPage() {
         heroClass: selectedClass,
         ancestry: selectedAncestry,
         sbtSnapshot,
-      });
+      }, executor);
 
       if (!mintResult.success) {
         throw new Error(mintResult.error || 'Hero SBT mint transaction was rejected.');
@@ -782,11 +788,11 @@ export default function CreateHeroPage() {
 
               <button
                 onClick={handleSave}
-                disabled={isSaving || availablePoints !== 0 || !name.trim()}
+                disabled={isSaving || isWalletExecuting || availablePoints !== 0 || !name.trim() || !executor}
                 className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-xl border border-amber-300/45 bg-amber-300/[0.1] px-4 py-3 font-cinzel text-[0.72rem] font-semibold uppercase tracking-[0.18em] text-amber-100 transition hover:bg-amber-300/[0.18] disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <Save className="h-4 w-4" />
-                {isSaving ? 'Forging...' : 'Enter The Game'}
+                {isSaving || isWalletExecuting ? 'Forging...' : 'Enter The Game'}
               </button>
             </section>
           </aside>

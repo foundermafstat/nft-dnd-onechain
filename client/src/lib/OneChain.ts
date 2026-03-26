@@ -1,6 +1,13 @@
 import { quoteAdventurePrepay, quoteHeroMintCost, type AdventurePrepayInput } from '@/lib/onechainEconomy';
 import { SERVER_URL } from '@/lib/config';
 import type { HeroSbtSnapshot } from '@/lib/shadowdarkSbt';
+import {
+  ONECHAIN_CONTRACT_META,
+  ONECHAIN_ENTRY_TARGETS,
+  assertOnechainContractConfigured,
+} from '@/lib/onechainContract';
+import { isOnechainObjectId } from 'shared';
+import { Transaction } from '@mysten/sui/transactions';
 
 type TxKind =
   | 'hero_sbt_mint'
@@ -15,9 +22,31 @@ export interface OneChainResult {
   kind: TxKind;
   hash?: string;
   sessionId?: number;
+  objectId?: string;
+  target?: string;
+  packageId?: string;
+  registryObjectId?: string;
   paidOne?: number;
   gasFeeOne?: number;
   error?: string;
+}
+
+export interface OnechainTxExecutionResult {
+  digest?: string;
+  events?: Array<{ type?: string; parsedJson?: Record<string, any> }>;
+  objectChanges?: Array<{
+    type?: string;
+    objectType?: string;
+    objectId?: string;
+    [key: string]: any;
+  }>;
+  effects?: any;
+  rawEffects?: number[];
+}
+
+export interface OnechainWalletExecutor {
+  accountAddress: string;
+  execute: (tx: unknown) => Promise<OnechainTxExecutionResult>;
 }
 
 interface HeroMintInput {
@@ -39,6 +68,71 @@ interface StartAdventureInput {
   aiRollsCount?: number;
 }
 
+interface MintInventoryInput {
+  playerAddress: string;
+  recipient?: string;
+  name?: string;
+  rarityTier?: number;
+  metadataCid?: string;
+  loreCid?: string;
+}
+
+interface MintInventoryFromPrepayInput {
+  playerAddress: string;
+  adventureId: number;
+  name?: string;
+  rarityTier?: number;
+  metadataCid?: string;
+  loreCid?: string;
+}
+
+interface ListSaleInput {
+  sellerAddress: string;
+  inventoryNftObjectId: string;
+  priceOne: number;
+}
+
+interface BuySaleInput {
+  buyerAddress: string;
+  saleListingObjectId: string;
+  priceOne: number;
+}
+
+interface CancelSaleInput {
+  sellerAddress: string;
+  saleListingObjectId: string;
+}
+
+interface ListRentalInput {
+  lenderAddress: string;
+  inventoryNftObjectId: string;
+  rentPriceOne: number;
+  collateralOne: number;
+  durationMs: number;
+}
+
+interface StartRentalInput {
+  renterAddress: string;
+  rentalListingObjectId: string;
+  rentPriceOne: number;
+  collateralOne: number;
+}
+
+interface ReturnRentalInput {
+  renterAddress: string;
+  rentalListingObjectId: string;
+}
+
+interface ClaimRentalDefaultInput {
+  lenderAddress: string;
+  rentalListingObjectId: string;
+}
+
+interface CancelRentalInput {
+  lenderAddress: string;
+  rentalListingObjectId: string;
+}
+
 export interface DiceConsumeResult {
   success: boolean;
   roll?: number;
@@ -47,33 +141,114 @@ export interface DiceConsumeResult {
   error?: string;
 }
 
-const txHash = (kind: TxKind, playerAddress: string, suffix: string | number) =>
-  `onechain-${kind}-${playerAddress.slice(0, 6)}-${suffix}`;
+const ONECHAIN_CLOCK_OBJECT_ID = process.env.NEXT_PUBLIC_ONECHAIN_CLOCK_OBJECT_ID || '0x6';
+const MIST_PER_ONE = 1_000_000_000;
 
-/**
- * Placeholder transaction helper.
- * Replace with real OneChain PTB execution when contract ids are available.
- */
-async function simulateTx(
-  kind: TxKind,
+function round6(value: number): number {
+  return Number(value.toFixed(6));
+}
+
+function oneToMist(one: number): number {
+  return Math.max(0, Math.round(one * MIST_PER_ONE));
+}
+
+function normalizeAddress(address: string): string {
+  return address.trim().toLowerCase();
+}
+
+function readNumberField(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return undefined;
+}
+
+function parseGasFeeOne(result: OnechainTxExecutionResult | null | undefined): number | undefined {
+  const gasUsed = result?.effects?.gasUsed;
+  if (!gasUsed) return undefined;
+  const computationCost = readNumberField(gasUsed.computationCost) ?? 0;
+  const storageCost = readNumberField(gasUsed.storageCost) ?? 0;
+  const storageRebate = readNumberField(gasUsed.storageRebate) ?? 0;
+  return round6((computationCost + storageCost - storageRebate) / MIST_PER_ONE);
+}
+
+function extractEvent<T extends Record<string, any>>(
+  result: OnechainTxExecutionResult | null | undefined,
+  eventName: string,
+): T | null {
+  const found = result?.events?.find((event) => event?.type?.endsWith(`::${eventName}`));
+  return (found?.parsedJson as T | undefined) || null;
+}
+
+function extractCreatedObjectId(
+  result: OnechainTxExecutionResult | null | undefined,
+  typeSuffix: string,
+): string | undefined {
+  return result?.objectChanges?.find((change) => {
+    if (change?.type !== 'created') return false;
+    if (!change.objectId || !change.objectType) return false;
+    return change.objectType.endsWith(typeSuffix);
+  })?.objectId;
+}
+
+function csv(values: string[] | undefined): string {
+  if (!values?.length) return '';
+  return values.map((value) => value.trim()).filter(Boolean).join(',');
+}
+
+function ensureExecutor(
+  executor: OnechainWalletExecutor | undefined,
   playerAddress: string,
+  kind: TxKind,
+): OneChainResult | null {
+  if (!executor) {
+    return {
+      success: false,
+      kind,
+      error: 'Wallet signer is unavailable. Reconnect OneWallet and try again.',
+    };
+  }
+  if (normalizeAddress(executor.accountAddress) !== normalizeAddress(playerAddress)) {
+    return {
+      success: false,
+      kind,
+      error: 'Connected wallet does not match the active player wallet.',
+    };
+  }
+  return null;
+}
+
+function baseSuccessResult(
+  kind: TxKind,
+  hash: string | undefined,
+  target: string,
   paidOne: number,
-  gasFeeOne: number,
-  sessionId?: number,
-): Promise<OneChainResult> {
-  const suffix = sessionId ?? Date.now();
+  gasFeeOne?: number,
+): OneChainResult {
   return {
     success: true,
     kind,
-    hash: txHash(kind, playerAddress, suffix),
-    sessionId,
-    paidOne: Number(paidOne.toFixed(6)),
-    gasFeeOne: Number(gasFeeOne.toFixed(6)),
+    hash,
+    target,
+    packageId: ONECHAIN_CONTRACT_META.packageId,
+    registryObjectId: ONECHAIN_CONTRACT_META.registryObjectId,
+    paidOne: round6(paidOne),
+    gasFeeOne,
   };
 }
 
-export async function mintHeroSBT(input: HeroMintInput): Promise<OneChainResult> {
+export async function mintHeroSBT(
+  input: HeroMintInput,
+  executor?: OnechainWalletExecutor,
+): Promise<OneChainResult> {
   try {
+    assertOnechainContractConfigured();
+    const executorError = ensureExecutor(executor, input.playerAddress, 'hero_sbt_mint');
+    if (executorError) return executorError;
     if (!input.playerAddress) {
       return { success: false, kind: 'hero_sbt_mint', error: 'Wallet address is required.' };
     }
@@ -103,7 +278,56 @@ export async function mintHeroSBT(input: HeroMintInput): Promise<OneChainResult>
     }
 
     const quote = quoteHeroMintCost();
-    return await simulateTx('hero_sbt_mint', input.playerAddress, quote.totalOne, quote.gasBufferOne);
+    const paymentMist = oneToMist(quote.mintFeeOne);
+    const tx = new Transaction();
+    const [paymentCoin] = tx.splitCoins(tx.gas, [tx.pure.u64(paymentMist)]);
+
+    tx.moveCall({
+      target: ONECHAIN_ENTRY_TARGETS.mintHeroSbt,
+      arguments: [
+        tx.object(ONECHAIN_CONTRACT_META.registryObjectId),
+        paymentCoin,
+        tx.pure.string(input.heroName.trim()),
+        tx.pure.string(input.heroClass.trim()),
+        tx.pure.string(input.ancestry.trim()),
+        tx.pure.string(input.sbtSnapshot.alignment),
+        tx.pure.string(input.sbtSnapshot.deity.trim()),
+        tx.pure.string(input.sbtSnapshot.title.trim()),
+        tx.pure.string(input.sbtSnapshot.background.trim()),
+        tx.pure.u8(input.sbtSnapshot.strength),
+        tx.pure.u8(input.sbtSnapshot.dexterity),
+        tx.pure.u8(input.sbtSnapshot.constitution),
+        tx.pure.u8(input.sbtSnapshot.intelligence),
+        tx.pure.u8(input.sbtSnapshot.wisdom),
+        tx.pure.u8(input.sbtSnapshot.charisma),
+        tx.pure.u64(input.sbtSnapshot.maxHp),
+        tx.pure.u64(input.sbtSnapshot.armorClass),
+        tx.pure.u64(input.sbtSnapshot.startingGoldGp),
+        tx.pure.u64(input.sbtSnapshot.gearSlots),
+        tx.pure.string(csv(input.sbtSnapshot.languages)),
+        tx.pure.string(csv(input.sbtSnapshot.talents)),
+        tx.pure.string(csv(input.sbtSnapshot.knownSpells)),
+        tx.pure.string((input.originLoreCid || '').trim()),
+        tx.pure.string((input.portraitCid || '').trim()),
+        tx.pure.string((input.heroSheetCid || '').trim()),
+        tx.pure.string(input.sbtSnapshot.ruleset.trim()),
+        tx.object(ONECHAIN_CLOCK_OBJECT_ID),
+      ],
+    });
+
+    const execution = await executor!.execute(tx);
+    const event = extractEvent<{ fee_paid_mist?: number | string }>(execution, 'HeroMinted');
+    const paidOne =
+      event?.fee_paid_mist !== undefined
+        ? (Number(event.fee_paid_mist) || paymentMist) / MIST_PER_ONE
+        : paymentMist / MIST_PER_ONE;
+    return baseSuccessResult(
+      'hero_sbt_mint',
+      execution?.digest,
+      ONECHAIN_ENTRY_TARGETS.mintHeroSbt,
+      paidOne,
+      parseGasFeeOne(execution),
+    );
   } catch (error: any) {
     console.error('Error minting hero SBT on OneChain:', error);
     return {
@@ -114,8 +338,14 @@ export async function mintHeroSBT(input: HeroMintInput): Promise<OneChainResult>
   }
 }
 
-export async function startAdventureWithPrepay(input: StartAdventureInput): Promise<OneChainResult> {
+export async function startAdventureWithPrepay(
+  input: StartAdventureInput,
+  executor?: OnechainWalletExecutor,
+): Promise<OneChainResult> {
   try {
+    assertOnechainContractConfigured();
+    const executorError = ensureExecutor(executor, input.playerAddress, 'adventure_prepay');
+    if (executorError) return executorError;
     if (!input.playerAddress) {
       return { success: false, kind: 'adventure_prepay', error: 'Wallet address is required.' };
     }
@@ -124,34 +354,58 @@ export async function startAdventureWithPrepay(input: StartAdventureInput): Prom
       generationCount: input.generationCount,
       mintableDropsEstimate: input.mintableDropsEstimate,
     });
-    const response = await fetch(`${SERVER_URL}/api/adventure/session/start`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        playerAddress: input.playerAddress,
-        playerRollsCount: input.playerRollsCount ?? 64,
-        aiRollsCount: input.aiRollsCount ?? 64,
-      }),
+    const requiredOne = quote.entryFeeOne + quote.generationFeeOne + quote.mintReserveOne;
+    const paymentMist = oneToMist(requiredOne);
+
+    const tx = new Transaction();
+    const [paymentCoin] = tx.splitCoins(tx.gas, [tx.pure.u64(paymentMist)]);
+    tx.moveCall({
+      target: ONECHAIN_ENTRY_TARGETS.startAdventureAndPrepay,
+      arguments: [
+        tx.object(ONECHAIN_CONTRACT_META.registryObjectId),
+        paymentCoin,
+        tx.pure.u64(Math.max(0, Math.floor(input.generationCount))),
+        tx.pure.u64(Math.max(0, Math.floor(input.mintableDropsEstimate))),
+        tx.object(ONECHAIN_CLOCK_OBJECT_ID),
+      ],
     });
 
-    if (!response.ok) {
-      const errorBody = await response.json().catch(() => ({}));
-      throw new Error(errorBody?.error || 'Failed to initialize adventure dice packs');
+    const execution = await executor!.execute(tx);
+    const event = extractEvent<{ adventure_id?: number | string }>(execution, 'AdventureStarted');
+    const adventureId = Number(event?.adventure_id);
+    if (!Number.isInteger(adventureId) || adventureId <= 0) {
+      throw new Error('Adventure id was not found in onchain events.');
     }
 
-    const payload = await response.json();
-    const sessionId = Number(payload?.session?.sessionId);
-    if (!Number.isInteger(sessionId)) {
-      throw new Error('Adventure session id is missing');
+    try {
+      const response = await fetch(`${SERVER_URL}/api/adventure/session/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          adventureId,
+          playerAddress: input.playerAddress,
+          playerRollsCount: input.playerRollsCount ?? 64,
+          aiRollsCount: input.aiRollsCount ?? 64,
+        }),
+      });
+      if (!response.ok) {
+        const errorBody = await response.json().catch(() => ({}));
+        console.warn('Dice session initialization failed after onchain start:', errorBody);
+      }
+    } catch (error) {
+      console.warn('Failed to initialize offchain dice session:', error);
     }
 
-    return await simulateTx(
+    return {
+      ...baseSuccessResult(
       'adventure_prepay',
-      input.playerAddress,
-      quote.totalOne,
-      quote.gasBufferOne,
-      sessionId,
-    );
+      execution?.digest,
+      ONECHAIN_ENTRY_TARGETS.startAdventureAndPrepay,
+      requiredOne,
+      parseGasFeeOne(execution),
+      ),
+      sessionId: adventureId,
+    };
   } catch (error: any) {
     console.error('Error starting adventure on OneChain:', error);
     return {
@@ -162,36 +416,144 @@ export async function startAdventureWithPrepay(input: StartAdventureInput): Prom
   }
 }
 
-export async function mintInventoryNFT(playerAddress: string): Promise<OneChainResult> {
+export async function mintInventoryNFT(
+  input: MintInventoryInput | string,
+  executor?: OnechainWalletExecutor,
+): Promise<OneChainResult> {
   try {
-    return await simulateTx('inventory_nft_mint', playerAddress, 0.08, 0.02);
+    assertOnechainContractConfigured();
+    const normalized: MintInventoryInput =
+      typeof input === 'string'
+        ? { playerAddress: input }
+        : input;
+    const executorError = ensureExecutor(executor, normalized.playerAddress, 'inventory_nft_mint');
+    if (executorError) return executorError;
+
+    const paymentOne = 0.08;
+    const paymentMist = oneToMist(paymentOne);
+    const tx = new Transaction();
+    const [paymentCoin] = tx.splitCoins(tx.gas, [tx.pure.u64(paymentMist)]);
+    tx.moveCall({
+      target: ONECHAIN_ENTRY_TARGETS.mintInventoryNftPaid,
+      arguments: [
+        tx.object(ONECHAIN_CONTRACT_META.registryObjectId),
+        paymentCoin,
+        tx.pure.address(normalized.recipient || normalized.playerAddress),
+        tx.pure.string((normalized.name || 'Quest Relic').trim()),
+        tx.pure.u8(Math.max(1, Math.min(5, Math.floor(normalized.rarityTier ?? 2)))),
+        tx.pure.string((normalized.metadataCid || '').trim()),
+        tx.pure.string((normalized.loreCid || '').trim()),
+        tx.object(ONECHAIN_CLOCK_OBJECT_ID),
+      ],
+    });
+
+    const execution = await executor!.execute(tx);
+    const objectId = extractCreatedObjectId(execution, '::InventoryNFT');
+    return {
+      ...baseSuccessResult(
+      'inventory_nft_mint',
+      execution?.digest,
+      ONECHAIN_ENTRY_TARGETS.mintInventoryNftPaid,
+      paymentOne,
+      parseGasFeeOne(execution),
+      ),
+      objectId,
+    };
   } catch (error: any) {
     return { success: false, kind: 'inventory_nft_mint', error: error?.message || 'Mint failed' };
+  }
+}
+
+export async function mintInventoryNFTFromPrepay(
+  input: MintInventoryFromPrepayInput,
+  executor?: OnechainWalletExecutor,
+): Promise<OneChainResult> {
+  try {
+    assertOnechainContractConfigured();
+    const executorError = ensureExecutor(executor, input.playerAddress, 'inventory_nft_mint');
+    if (executorError) return executorError;
+    if (!Number.isInteger(input.adventureId) || input.adventureId <= 0) {
+      return { success: false, kind: 'inventory_nft_mint', error: 'adventureId is required.' };
+    }
+
+    const tx = new Transaction();
+    tx.moveCall({
+      target: ONECHAIN_ENTRY_TARGETS.mintInventoryNftFromPrepay,
+      arguments: [
+        tx.object(ONECHAIN_CONTRACT_META.registryObjectId),
+        tx.pure.u64(input.adventureId),
+        tx.pure.string((input.name || 'Adventure Drop').trim()),
+        tx.pure.u8(Math.max(1, Math.min(5, Math.floor(input.rarityTier ?? 2)))),
+        tx.pure.string((input.metadataCid || '').trim()),
+        tx.pure.string((input.loreCid || '').trim()),
+        tx.object(ONECHAIN_CLOCK_OBJECT_ID),
+      ],
+    });
+
+    const execution = await executor!.execute(tx);
+    const objectId = extractCreatedObjectId(execution, '::InventoryNFT');
+    return {
+      ...baseSuccessResult(
+        'inventory_nft_mint',
+        execution?.digest,
+        ONECHAIN_ENTRY_TARGETS.mintInventoryNftFromPrepay,
+        0,
+        parseGasFeeOne(execution),
+      ),
+      sessionId: input.adventureId,
+      objectId,
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      kind: 'inventory_nft_mint',
+      error: error?.message || 'Mint from prepay failed',
+    };
   }
 }
 
 export async function endGame(
   playerAddress: string,
   sessionId: number | string | null,
+  executor?: OnechainWalletExecutor,
 ): Promise<OneChainResult> {
   try {
-    if (typeof sessionId === 'number') {
-      const finalizeResponse = await fetch(`${SERVER_URL}/api/adventure/session/${sessionId}/finalize`, {
+    assertOnechainContractConfigured();
+    const normalizedSessionId = Number(sessionId);
+    if (!Number.isInteger(normalizedSessionId) || normalizedSessionId <= 0) {
+      return { success: false, kind: 'adventure_finalize', error: 'Invalid adventure session id.' };
+    }
+    const executorError = ensureExecutor(executor, playerAddress, 'adventure_finalize');
+    if (executorError) return executorError;
+
+    const tx = new Transaction();
+    tx.moveCall({
+      target: ONECHAIN_ENTRY_TARGETS.closeAdventureAndRefund,
+      arguments: [
+        tx.object(ONECHAIN_CONTRACT_META.registryObjectId),
+        tx.pure.u64(normalizedSessionId),
+      ],
+    });
+
+    const execution = await executor!.execute(tx);
+    try {
+      await fetch(`${SERVER_URL}/api/adventure/session/${normalizedSessionId}/finalize`, {
         method: 'POST',
       });
-      if (!finalizeResponse.ok) {
-        const errorBody = await finalizeResponse.json().catch(() => ({}));
-        throw new Error(errorBody?.error || 'Failed to finalize adventure dice session');
-      }
+    } catch (error) {
+      console.warn('Failed to finalize local dice session after onchain close:', error);
     }
 
-    return await simulateTx(
-      'adventure_finalize',
-      playerAddress,
-      0,
-      0.02,
-      typeof sessionId === 'number' ? sessionId : undefined,
-    );
+    return {
+      ...baseSuccessResult(
+        'adventure_finalize',
+        execution?.digest,
+        ONECHAIN_ENTRY_TARGETS.closeAdventureAndRefund,
+        0,
+        parseGasFeeOne(execution),
+      ),
+      sessionId: normalizedSessionId,
+    };
   } catch (error: any) {
     console.error('Error ending game on OneChain:', error);
     return {
@@ -205,6 +567,7 @@ export async function endGame(
 // Backward-compatible API currently used by QuestBoard.
 export async function startGame(
   playerAddress: string,
+  executor?: OnechainWalletExecutor,
   options: Partial<AdventurePrepayInput> & { playerRollsCount?: number; aiRollsCount?: number } = {},
 ): Promise<OneChainResult> {
   return startAdventureWithPrepay({
@@ -213,7 +576,299 @@ export async function startGame(
     mintableDropsEstimate: options.mintableDropsEstimate ?? 1,
     playerRollsCount: options.playerRollsCount ?? 64,
     aiRollsCount: options.aiRollsCount ?? 64,
-  });
+  }, executor);
+}
+
+export async function listInventoryForSale(
+  input: ListSaleInput,
+  executor?: OnechainWalletExecutor,
+): Promise<OneChainResult> {
+  try {
+    assertOnechainContractConfigured();
+    const executorError = ensureExecutor(executor, input.sellerAddress, 'market_sale');
+    if (executorError) return executorError;
+    if (!isOnechainObjectId(input.inventoryNftObjectId)) {
+      return { success: false, kind: 'market_sale', error: 'Invalid Inventory NFT object id.' };
+    }
+    if (input.priceOne <= 0) {
+      return { success: false, kind: 'market_sale', error: 'Sale price must be greater than zero.' };
+    }
+
+    const tx = new Transaction();
+    tx.moveCall({
+      target: ONECHAIN_ENTRY_TARGETS.listInventoryForSale,
+      arguments: [
+        tx.object(input.inventoryNftObjectId),
+        tx.pure.u64(oneToMist(input.priceOne)),
+        tx.object(ONECHAIN_CLOCK_OBJECT_ID),
+      ],
+    });
+
+    const execution = await executor!.execute(tx);
+    return {
+      ...baseSuccessResult(
+        'market_sale',
+        execution?.digest,
+        ONECHAIN_ENTRY_TARGETS.listInventoryForSale,
+        0,
+        parseGasFeeOne(execution),
+      ),
+      objectId: extractCreatedObjectId(execution, '::SaleListing'),
+    };
+  } catch (error: any) {
+    return { success: false, kind: 'market_sale', error: error?.message || 'Failed to list NFT for sale.' };
+  }
+}
+
+export async function buySaleListing(
+  input: BuySaleInput,
+  executor?: OnechainWalletExecutor,
+): Promise<OneChainResult> {
+  try {
+    assertOnechainContractConfigured();
+    const executorError = ensureExecutor(executor, input.buyerAddress, 'market_sale');
+    if (executorError) return executorError;
+    if (!isOnechainObjectId(input.saleListingObjectId)) {
+      return { success: false, kind: 'market_sale', error: 'Invalid sale listing object id.' };
+    }
+    if (input.priceOne <= 0) {
+      return { success: false, kind: 'market_sale', error: 'Buy price must be greater than zero.' };
+    }
+
+    const paymentMist = oneToMist(input.priceOne);
+    const tx = new Transaction();
+    const [paymentCoin] = tx.splitCoins(tx.gas, [tx.pure.u64(paymentMist)]);
+    tx.moveCall({
+      target: ONECHAIN_ENTRY_TARGETS.buySaleListing,
+      arguments: [
+        tx.object(ONECHAIN_CONTRACT_META.registryObjectId),
+        tx.object(input.saleListingObjectId),
+        paymentCoin,
+      ],
+    });
+
+    const execution = await executor!.execute(tx);
+    return baseSuccessResult(
+      'market_sale',
+      execution?.digest,
+      ONECHAIN_ENTRY_TARGETS.buySaleListing,
+      input.priceOne,
+      parseGasFeeOne(execution),
+    );
+  } catch (error: any) {
+    return { success: false, kind: 'market_sale', error: error?.message || 'Failed to buy sale listing.' };
+  }
+}
+
+export async function cancelSaleListing(
+  input: CancelSaleInput,
+  executor?: OnechainWalletExecutor,
+): Promise<OneChainResult> {
+  try {
+    assertOnechainContractConfigured();
+    const executorError = ensureExecutor(executor, input.sellerAddress, 'market_sale');
+    if (executorError) return executorError;
+    if (!isOnechainObjectId(input.saleListingObjectId)) {
+      return { success: false, kind: 'market_sale', error: 'Invalid sale listing object id.' };
+    }
+
+    const tx = new Transaction();
+    tx.moveCall({
+      target: ONECHAIN_ENTRY_TARGETS.cancelSaleListing,
+      arguments: [tx.object(input.saleListingObjectId)],
+    });
+    const execution = await executor!.execute(tx);
+    return baseSuccessResult(
+      'market_sale',
+      execution?.digest,
+      ONECHAIN_ENTRY_TARGETS.cancelSaleListing,
+      0,
+      parseGasFeeOne(execution),
+    );
+  } catch (error: any) {
+    return { success: false, kind: 'market_sale', error: error?.message || 'Failed to cancel sale listing.' };
+  }
+}
+
+export async function listInventoryForRent(
+  input: ListRentalInput,
+  executor?: OnechainWalletExecutor,
+): Promise<OneChainResult> {
+  try {
+    assertOnechainContractConfigured();
+    const executorError = ensureExecutor(executor, input.lenderAddress, 'market_rent');
+    if (executorError) return executorError;
+    if (!isOnechainObjectId(input.inventoryNftObjectId)) {
+      return { success: false, kind: 'market_rent', error: 'Invalid Inventory NFT object id.' };
+    }
+    if (input.rentPriceOne <= 0 || input.collateralOne < 0) {
+      return { success: false, kind: 'market_rent', error: 'Invalid rent or collateral amount.' };
+    }
+    if (!Number.isInteger(input.durationMs) || input.durationMs <= 0) {
+      return { success: false, kind: 'market_rent', error: 'Invalid rental duration.' };
+    }
+
+    const tx = new Transaction();
+    tx.moveCall({
+      target: ONECHAIN_ENTRY_TARGETS.listInventoryForRent,
+      arguments: [
+        tx.object(input.inventoryNftObjectId),
+        tx.pure.u64(oneToMist(input.rentPriceOne)),
+        tx.pure.u64(oneToMist(input.collateralOne)),
+        tx.pure.u64(input.durationMs),
+        tx.object(ONECHAIN_CLOCK_OBJECT_ID),
+      ],
+    });
+
+    const execution = await executor!.execute(tx);
+    return {
+      ...baseSuccessResult(
+        'market_rent',
+        execution?.digest,
+        ONECHAIN_ENTRY_TARGETS.listInventoryForRent,
+        0,
+        parseGasFeeOne(execution),
+      ),
+      objectId: extractCreatedObjectId(execution, '::RentalListing'),
+    };
+  } catch (error: any) {
+    return { success: false, kind: 'market_rent', error: error?.message || 'Failed to list NFT for rent.' };
+  }
+}
+
+export async function startRental(
+  input: StartRentalInput,
+  executor?: OnechainWalletExecutor,
+): Promise<OneChainResult> {
+  try {
+    assertOnechainContractConfigured();
+    const executorError = ensureExecutor(executor, input.renterAddress, 'market_rent');
+    if (executorError) return executorError;
+    if (!isOnechainObjectId(input.rentalListingObjectId)) {
+      return { success: false, kind: 'market_rent', error: 'Invalid rental listing object id.' };
+    }
+    if (input.rentPriceOne <= 0 || input.collateralOne < 0) {
+      return { success: false, kind: 'market_rent', error: 'Invalid rent or collateral amount.' };
+    }
+
+    const paymentOne = input.rentPriceOne + input.collateralOne;
+    const tx = new Transaction();
+    const [paymentCoin] = tx.splitCoins(tx.gas, [tx.pure.u64(oneToMist(paymentOne))]);
+    tx.moveCall({
+      target: ONECHAIN_ENTRY_TARGETS.startRental,
+      arguments: [
+        tx.object(ONECHAIN_CONTRACT_META.registryObjectId),
+        tx.object(input.rentalListingObjectId),
+        paymentCoin,
+        tx.object(ONECHAIN_CLOCK_OBJECT_ID),
+      ],
+    });
+
+    const execution = await executor!.execute(tx);
+    return baseSuccessResult(
+      'market_rent',
+      execution?.digest,
+      ONECHAIN_ENTRY_TARGETS.startRental,
+      paymentOne,
+      parseGasFeeOne(execution),
+    );
+  } catch (error: any) {
+    return { success: false, kind: 'market_rent', error: error?.message || 'Failed to start rental.' };
+  }
+}
+
+export async function returnRental(
+  input: ReturnRentalInput,
+  executor?: OnechainWalletExecutor,
+): Promise<OneChainResult> {
+  try {
+    assertOnechainContractConfigured();
+    const executorError = ensureExecutor(executor, input.renterAddress, 'market_rent');
+    if (executorError) return executorError;
+    if (!isOnechainObjectId(input.rentalListingObjectId)) {
+      return { success: false, kind: 'market_rent', error: 'Invalid rental listing object id.' };
+    }
+
+    const tx = new Transaction();
+    tx.moveCall({
+      target: ONECHAIN_ENTRY_TARGETS.returnRental,
+      arguments: [tx.object(input.rentalListingObjectId)],
+    });
+    const execution = await executor!.execute(tx);
+    return baseSuccessResult(
+      'market_rent',
+      execution?.digest,
+      ONECHAIN_ENTRY_TARGETS.returnRental,
+      0,
+      parseGasFeeOne(execution),
+    );
+  } catch (error: any) {
+    return { success: false, kind: 'market_rent', error: error?.message || 'Failed to return rental.' };
+  }
+}
+
+export async function claimRentalDefault(
+  input: ClaimRentalDefaultInput,
+  executor?: OnechainWalletExecutor,
+): Promise<OneChainResult> {
+  try {
+    assertOnechainContractConfigured();
+    const executorError = ensureExecutor(executor, input.lenderAddress, 'market_rent');
+    if (executorError) return executorError;
+    if (!isOnechainObjectId(input.rentalListingObjectId)) {
+      return { success: false, kind: 'market_rent', error: 'Invalid rental listing object id.' };
+    }
+
+    const tx = new Transaction();
+    tx.moveCall({
+      target: ONECHAIN_ENTRY_TARGETS.claimRentalDefault,
+      arguments: [
+        tx.object(ONECHAIN_CONTRACT_META.registryObjectId),
+        tx.object(input.rentalListingObjectId),
+        tx.object(ONECHAIN_CLOCK_OBJECT_ID),
+      ],
+    });
+    const execution = await executor!.execute(tx);
+    return baseSuccessResult(
+      'market_rent',
+      execution?.digest,
+      ONECHAIN_ENTRY_TARGETS.claimRentalDefault,
+      0,
+      parseGasFeeOne(execution),
+    );
+  } catch (error: any) {
+    return { success: false, kind: 'market_rent', error: error?.message || 'Failed to claim rental default.' };
+  }
+}
+
+export async function cancelRentalListing(
+  input: CancelRentalInput,
+  executor?: OnechainWalletExecutor,
+): Promise<OneChainResult> {
+  try {
+    assertOnechainContractConfigured();
+    const executorError = ensureExecutor(executor, input.lenderAddress, 'market_rent');
+    if (executorError) return executorError;
+    if (!isOnechainObjectId(input.rentalListingObjectId)) {
+      return { success: false, kind: 'market_rent', error: 'Invalid rental listing object id.' };
+    }
+
+    const tx = new Transaction();
+    tx.moveCall({
+      target: ONECHAIN_ENTRY_TARGETS.cancelRentalListing,
+      arguments: [tx.object(input.rentalListingObjectId)],
+    });
+    const execution = await executor!.execute(tx);
+    return baseSuccessResult(
+      'market_rent',
+      execution?.digest,
+      ONECHAIN_ENTRY_TARGETS.cancelRentalListing,
+      0,
+      parseGasFeeOne(execution),
+    );
+  } catch (error: any) {
+    return { success: false, kind: 'market_rent', error: error?.message || 'Failed to cancel rental listing.' };
+  }
 }
 
 export async function consumeAdventureDiceRoll(

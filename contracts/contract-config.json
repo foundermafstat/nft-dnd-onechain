@@ -1,14 +1,16 @@
 {
   "network": "onechain-testnet",
   "packageName": "nft_dnd",
-  "packageId": "",
-  "deployerAddress": "",
-  "registryObjectId": "",
-  "upgradeCapId": "",
-  "transactionDigest": "",
-  "deployedAt": "",
+  "packageId": "0x8cca22099fe19bd90cbed43fb2573a90f8bc43100f1d639bc4bee93486c833b7",
+  "deployerAddress": "0x195809d7fa86b379fa8f9d0e7ca1edb78f0db32cac09c9d2a8d6667e00636d71",
+  "registryObjectId": "0xdd2a58cbcd10e71b186cf8779a1f4e360c4a385fa2548a8dda51922d5e20d833",
+  "adminCapId": "0x20fc57100cdb9043f65b69133426f768b822048dcbd2314e36f4532a71d9f7d2",
+  "upgradeCapId": "0xac4c55600a7622bc0164ec950a7bb3b6853337656ad92c421fd8f7a8e798077a",
+  "transactionDigest": "4mVpabfsJptzT4iuTjCgvJgnkUgtSN5BJd3d29QamZKy",
+  "deployedAt": "2026-03-26T20:15:55.124000Z",
+  "deployedCheckpoint": "101596653",
   "notes": {
-    "description": "NFT-DND on-chain registry for AI-generated legendary items and chronicle badges",
+    "description": "NFT-DND on-chain registry for Hero SBT, Inventory NFT market/rental, prepay escrow and DicePack flow",
     "market": "onechain-testnet"
   }
 }

@@ -155,8 +155,8 @@ export async function getCharacterInventory(characterId: string): Promise<any[]>
             acquired_at,
             items:item_id (
                 id, name, base_type, category, subcategory, rarity,
-                cost_gp, slots, stats, bonuses, perks, lore,
-                is_nft, blockchain_status
+                cost_gp, slots, stats, bonuses, perks, lore, metadata,
+                is_nft, blockchain_status, onechain_token_id
             )
         `)
         .eq('character_id', characterId);
@@ -198,6 +198,26 @@ export async function unequipItem(inventoryEntryId: string): Promise<boolean> {
         .eq('id', inventoryEntryId);
     if (error) {
         console.error('Error unequipping item:', error);
+        return false;
+    }
+    return true;
+}
+export async function updateItemBlockchainInfo(
+    itemId: string,
+    onechainTokenId: string,
+    blockchainStatus: string = 'MINTED',
+): Promise<boolean> {
+    const { error } = await supabase
+        .from('items')
+        .update({
+            onechain_token_id: onechainTokenId,
+            blockchain_status: blockchainStatus,
+            is_nft: true,
+        })
+        .eq('id', itemId);
+
+    if (error) {
+        console.error('Error updating item blockchain info:', error);
         return false;
     }
     return true;

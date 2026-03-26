@@ -66,3 +66,18 @@ export async function getCharactersByPlayerId(playerId: string) {
 
     return data;
 }
+
+export async function getCharacterById(characterId: string) {
+    const { data, error } = await supabase
+        .from('characters')
+        .select('*')
+        .eq('id', characterId)
+        .single();
+
+    if (error) {
+        console.error('Error fetching character by id:', error);
+        throw error;
+    }
+
+    return data;
+}

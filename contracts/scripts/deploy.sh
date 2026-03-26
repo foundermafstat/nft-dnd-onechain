@@ -55,10 +55,14 @@ echo "3. Current gas objects..."
 echo ""
 
 echo "4. Building Move package..."
-"$CLI_BIN" move build
+"$CLI_BIN" move build --skip-fetch-latest-git-deps
 echo ""
 
 echo "5. Publishing package to $ENV_ALIAS..."
 echo "Save the package id, upgrade cap id and created registry object from the output below."
 echo ""
-"$CLI_BIN" client publish --gas-budget 100000000
+PUBLISH_GAS_BUDGET="${ONECHAIN_PUBLISH_GAS_BUDGET:-300000000}"
+"$CLI_BIN" client publish \
+  --skip-fetch-latest-git-deps \
+  --skip-dependency-verification \
+  --gas-budget "$PUBLISH_GAS_BUDGET"

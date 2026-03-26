@@ -9,6 +9,7 @@ import { DiceType } from '@/components/DiceOverlay';
 import { SERVER_URL } from '@/lib/config';
 import { endGame } from '@/lib/OneChain';
 import { useAuth } from '@/context/AuthContext';
+import { useOnechainWalletExecutor } from '@/hooks/useOnechainWalletExecutor';
 
 interface InteractionPanelProps {
 	triggerRoll: (type: DiceType) => void;
@@ -43,6 +44,7 @@ export default function InteractionPanel({ triggerRoll }: InteractionPanelProps)
 		testQuestSessionId
 	} = useGameState();
 	const { walletAddress } = useAuth();
+	const { executor } = useOnechainWalletExecutor();
 	const [inputText, setInputText] = useState('');
 	const [isSendingDialog, setIsSendingDialog] = useState(false);
 	const [isEndingQuest, setIsEndingQuest] = useState(false);
@@ -161,11 +163,16 @@ export default function InteractionPanel({ triggerRoll }: InteractionPanelProps)
 
 	const handleEndQuest = async () => {
 		if (!walletAddress || !testQuestSessionId) return;
+		if (!executor) {
+			addMessage({ sender: 'System', senderType: 'system', content: 'Wallet signer unavailable. Reconnect OneWallet.' });
+			return;
+		}
 		setIsEndingQuest(true);
 		try {
-			const res = await endGame(walletAddress, testQuestSessionId);
+			const res = await endGame(walletAddress, testQuestSessionId, executor);
 			if (res.success) {
 				setTestQuestState('not_started');
+				setActiveNpc(null);
 				addMessage({
 					sender: 'System',
 					senderType: 'system',

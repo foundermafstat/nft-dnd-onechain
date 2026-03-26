@@ -8,14 +8,15 @@ import CryptoJS from 'crypto-js';
 import { supabase } from './db/supabase';
 import { uploadToIPFS } from './services/ipfs';
 import { upsertPlayerByWallet } from './db/playerQueries';
-import { createCharacter, getCharactersByPlayerId } from './db/characterQueries';
+import { createCharacter, getCharacterById, getCharactersByPlayerId } from './db/characterQueries';
 import { createQuest, finishQuest, getAllQuests, getQuestById, getQuestHistory, seedLocations, getAllLocations, getLocationById, upsertPlayerPosition, getPlayerPosition, getPlayersInLocation } from './db/questQueries';
 import { getNpcsByLocation, getNpcById, seedNpcs } from './db/npcQueries';
-import { seedItems, getAllTemplateItems, getItemsByCategory, getItemById, createItemInstance, addItemToInventory, getCharacterInventory, removeItemFromInventory, equipItem, unequipItem } from './db/itemQueries';
-import { seedAbilities, getAllAbilities, getAbilitiesByType, getAbilitiesForClass, getAbilitiesForAncestry, getAbilityById, learnAbility, getCharacterAbilities, forgetAbility } from './db/abilityQueries';
+import { seedItems, getAllTemplateItems, getItemsByCategory, getItemById, createItemInstance, addItemToInventory, getCharacterInventory, removeItemFromInventory, equipItem, unequipItem, updateItemBlockchainInfo } from './db/itemQueries';
+import { seedAbilities, getAllAbilities, getAbilitiesByType, getAbilitiesForClass, getAbilitiesForAncestry, getAbilityById, learnAbility, getCharacterAbilities, forgetAbility, getAbilitiesForProfile } from './db/abilityQueries';
 import { ALL_SEED_LOCATIONS } from './game/locationSeeds';
 import { ALL_SEED_NPCS } from './game/npcSeeds';
 import { ALL_SEED_ITEMS, CLASS_STARTER_ITEMS } from './game/itemSeeds';
+import { QUICKSTART_COMMON_ITEM_SEEDS } from './game/quickstartCommonItemSeeds';
 import { ALL_SEED_ABILITIES } from './game/abilitySeeds';
 import { QuestDirector, QuestActionInput } from './ai/QuestDirector';
 import { generateNpcDialog } from './ai/npcDialog';
@@ -24,6 +25,7 @@ import { getCombat } from './db/combatQueries';
 import { ScenarioGenerator } from './ai/ScenarioGenerator';
 import { getRecentChronicles, insertChronicle } from './db/scenarioQueries';
 import { dicepackService } from './services/dicepack';
+import { onechainContractMeta, onechainEntryTargets, isOnechainContractConfigured } from './services/onechainContract';
 
 const questDirector = new QuestDirector();
 const combatEngine = new CombatEngine();
@@ -49,6 +51,15 @@ const openai = new OpenAI({
 
 app.get('/api/health', (req, res) => {
     res.json({ status: 'ok', message: 'NFT-DND Server is running' });
+});
+
+app.get('/api/onechain/contract', (req, res) => {
+    res.json({
+        success: true,
+        configured: isOnechainContractConfigured(),
+        contract: onechainContractMeta,
+        targets: onechainEntryTargets,
+    });
 });
 
 app.post('/api/auth/wallet', async (req, res) => {
@@ -314,9 +325,9 @@ app.get('/api/item/:id', async (req, res) => {
 
 app.post('/api/item/seed', async (req, res) => {
     try {
-        const success = await seedItems(ALL_SEED_ITEMS);
+        const success = await seedItems([...ALL_SEED_ITEMS, ...QUICKSTART_COMMON_ITEM_SEEDS]);
         if (!success) return res.status(500).json({ error: 'Failed to seed items' });
-        res.json({ success: true, count: ALL_SEED_ITEMS.length });
+        res.json({ success: true, count: ALL_SEED_ITEMS.length + QUICKSTART_COMMON_ITEM_SEEDS.length });
     } catch (error: any) {
         res.status(500).json({ error: 'Item seed failed', details: error.message });
     }
@@ -366,6 +377,39 @@ app.post('/api/character/:id/inventory/give-starter-kit', async (req, res) => {
     }
 });
 
+app.post('/api/character/:id/inventory/ensure-starter-kit', async (req, res) => {
+    try {
+        const characterId = req.params.id;
+        const existingInventory = await getCharacterInventory(characterId);
+        if (existingInventory.length > 0) {
+            return res.json({ success: true, seeded: false, itemsGiven: 0 });
+        }
+
+        const character = await getCharacterById(characterId);
+        if (!character?.class) {
+            return res.status(404).json({ error: 'Character class not found' });
+        }
+
+        const starterItems = CLASS_STARTER_ITEMS[character.class];
+        if (!starterItems) {
+            return res.status(400).json({ error: `No starter kit for class: ${character.class}` });
+        }
+
+        const results: string[] = [];
+        for (const templateId of starterItems) {
+            const itemId = await createItemInstance(templateId);
+            if (itemId) {
+                await addItemToInventory(characterId, itemId);
+                results.push(itemId);
+            }
+        }
+
+        res.json({ success: true, seeded: true, itemsGiven: results.length });
+    } catch (error: any) {
+        res.status(500).json({ error: 'Ensure starter kit failed', details: error.message });
+    }
+});
+
 app.put('/api/inventory/:entryId/equip', async (req, res) => {
     try {
         const { slotPosition } = req.body;
@@ -397,6 +441,19 @@ app.delete('/api/inventory/:entryId', async (req, res) => {
     }
 });
 
+app.post('/api/item/:id/blockchain', async (req, res) => {
+    try {
+        const { onechainTokenId, blockchainStatus } = req.body;
+        const itemId = req.params.id;
+        if (!onechainTokenId) return res.status(400).json({ error: 'onechainTokenId is required' });
+        const success = await updateItemBlockchainInfo(itemId, onechainTokenId, blockchainStatus || 'MINTED');
+        if (!success) return res.status(500).json({ error: 'Failed to update blockchain info' });
+        res.json({ success: true });
+    } catch (error: any) {
+        res.status(500).json({ error: 'Blockchain update failed', details: error.message });
+    }
+});
+
 // --- ABILITY ENDPOINTS ---
 
 app.get('/api/ability/list', async (req, res) => {
@@ -412,6 +469,22 @@ app.get('/api/ability/list', async (req, res) => {
         res.json({ success: true, abilities });
     } catch (error: any) {
         res.status(500).json({ error: 'Failed to fetch abilities', details: error.message });
+    }
+});
+
+app.get('/api/ability/profile', async (req, res) => {
+    try {
+        const heroClass = req.query.class as string | undefined;
+        const ancestry = req.query.ancestry as string | undefined;
+        if (!heroClass || !ancestry) {
+            return res.status(400).json({ error: 'class and ancestry query params are required' });
+        }
+
+        const includeTypes = ['ancestry_feature', 'class_feature', 'talent', 'skill'];
+        const abilities = await getAbilitiesForProfile(heroClass, ancestry, { includeTypes });
+        res.json({ success: true, abilities });
+    } catch (error: any) {
+        res.status(500).json({ error: 'Failed to fetch profile abilities', details: error.message });
     }
 });
 
@@ -743,6 +816,7 @@ app.post('/api/adventure/init', async (req, res) => {
 app.post('/api/adventure/session/start', async (req, res) => {
     try {
         const {
+            adventureId,
             playerAddress,
             playerRollsCount,
             aiRollsCount,
@@ -754,6 +828,7 @@ app.post('/api/adventure/session/start', async (req, res) => {
 
         const result = dicepackService.startSession({
             playerAddress,
+            adventureId,
             playerRollsCount,
             aiRollsCount,
         });

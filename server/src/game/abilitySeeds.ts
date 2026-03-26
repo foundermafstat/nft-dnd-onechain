@@ -1106,10 +1106,26 @@ const SKILLS: AbilitySeed[] = [
 // EXPORTS
 // ═══════════════════════════════════════════════════════════════════
 
+const ABILITY_ICON_BY_TYPE: Record<string, string> = {
+    ancestry_feature: 'ancestry-sigil',
+    class_feature: 'class-emblem',
+    talent: 'talent-star',
+    spell: 'spell-glyph',
+    skill: 'skill-rune',
+};
+
 export const ALL_SEED_ABILITIES: AbilitySeed[] = [
     ...ANCESTRY_FEATURES,
     ...CLASS_FEATURES,
     ...TALENTS,
     ...SPELLS,
     ...SKILLS,
-];
+].map((ability) => ({
+    ...ability,
+    source: ability.source || 'shadowdark_quickstart_pdf',
+    metadata: {
+        ...(ability.metadata || {}),
+        source_book: 'Shadowdark Player Quickstart - Digital',
+        icon_key: ability.metadata?.icon_key || ABILITY_ICON_BY_TYPE[ability.ability_type] || 'ability-core',
+    },
+}));

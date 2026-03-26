@@ -25,6 +25,15 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { useAuth } from '@/context/AuthContext';
+import { useOnechainWalletExecutor } from '@/hooks/useOnechainWalletExecutor';
+import {
+  buySaleListing,
+  listInventoryForRent,
+  listInventoryForSale,
+  startRental,
+  type OneChainResult,
+} from '@/lib/OneChain';
 
 type MarketAction = 'buy' | 'sell' | 'rent_out' | 'rent_now';
 type MarketType = 'weapon' | 'trinket' | 'artifact' | 'stronghold';
@@ -226,7 +235,23 @@ const actionStyle: Record<MarketAction, { label: string; icon: ReactNode; classN
   },
 };
 
-function MarketCardItem({ item }: { item: MarketCard }) {
+function MarketCardItem({
+  item,
+  inventoryObjectId,
+  listingObjectId,
+  onInventoryObjectIdChange,
+  onListingObjectIdChange,
+  onAction,
+  isActionBusy,
+}: {
+  item: MarketCard;
+  inventoryObjectId: string;
+  listingObjectId: string;
+  onInventoryObjectIdChange: (value: string) => void;
+  onListingObjectIdChange: (value: string) => void;
+  onAction: (item: MarketCard, action: MarketAction) => void;
+  isActionBusy: boolean;
+}) {
   return (
     <Card className="group overflow-hidden rounded-[24px] border-white/8 bg-[linear-gradient(180deg,rgba(19,19,22,0.94),rgba(12,12,14,0.96))] py-0 shadow-[0_18px_36px_rgba(0,0,0,0.35)]">
       <CardHeader className="px-4 pb-3 pt-4">
@@ -271,16 +296,32 @@ function MarketCardItem({ item }: { item: MarketCard }) {
         <div className="text-[0.65rem] uppercase tracking-[0.22em] text-stone-500">
           Owner: <span className="text-stone-300">{item.owner}</span>
         </div>
+        <div className="space-y-2">
+          <Input
+            value={inventoryObjectId}
+            onChange={(event) => onInventoryObjectIdChange(event.target.value)}
+            placeholder="Inventory NFT object id (for Sell/Rent Out)"
+            className="h-8 rounded-lg border-white/12 bg-white/[0.02] text-[0.66rem] placeholder:text-stone-500"
+          />
+          <Input
+            value={listingObjectId}
+            onChange={(event) => onListingObjectIdChange(event.target.value)}
+            placeholder="Listing object id (for Buy/Rent Now)"
+            className="h-8 rounded-lg border-white/12 bg-white/[0.02] text-[0.66rem] placeholder:text-stone-500"
+          />
+        </div>
         <div className="grid grid-cols-2 gap-2">
           {item.availableActions.map((action) => (
             <Button
               key={`${item.id}-${action}`}
               variant="outline"
               size="sm"
+              disabled={isActionBusy}
+              onClick={() => onAction(item, action)}
               className={`h-8 rounded-lg text-[0.68rem] tracking-[0.12em] uppercase ${actionStyle[action].className}`}
             >
               {actionStyle[action].icon}
-              {actionStyle[action].label}
+              {isActionBusy ? 'Pending...' : actionStyle[action].label}
             </Button>
           ))}
         </div>
@@ -290,10 +331,17 @@ function MarketCardItem({ item }: { item: MarketCard }) {
 }
 
 export default function MarketplacePage() {
+  const { walletAddress } = useAuth();
+  const { executor, isExecuting: isWalletExecuting } = useOnechainWalletExecutor();
   const [query, setQuery] = useState('');
   const [rarityFilter, setRarityFilter] = useState<string>('all');
   const [typeFilter, setTypeFilter] = useState<string>('all');
   const [tab, setTab] = useState<MarketTab>('discover');
+  const [inventoryObjectIds, setInventoryObjectIds] = useState<Record<string, string>>({});
+  const [listingObjectIds, setListingObjectIds] = useState<Record<string, string>>({});
+  const [actionStateByCard, setActionStateByCard] = useState<Record<string, boolean>>({});
+  const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const visibleCards = useMemo(() => {
     return nftInventory.filter((item) => {
@@ -310,6 +358,121 @@ export default function MarketplacePage() {
       return matchesQuery && matchesRarity && matchesType;
     });
   }, [query, rarityFilter, typeFilter, tab]);
+
+  const setCardBusy = (cardId: string, isBusy: boolean) => {
+    setActionStateByCard((prev) => ({ ...prev, [cardId]: isBusy }));
+  };
+
+  const writeInventoryObjectId = (cardId: string, value: string) => {
+    setInventoryObjectIds((prev) => ({ ...prev, [cardId]: value }));
+  };
+
+  const writeListingObjectId = (cardId: string, value: string) => {
+    setListingObjectIds((prev) => ({ ...prev, [cardId]: value }));
+  };
+
+  const reportResult = (card: MarketCard, action: MarketAction, result: OneChainResult) => {
+    if (!result.success) {
+      throw new Error(result.error || `Failed to ${actionStyle[action].label.toLowerCase()}.`);
+    }
+    const shortHash = result.hash ? `${result.hash.slice(0, 12)}...` : 'submitted';
+    setActionMessage(`${card.name}: ${actionStyle[action].label} confirmed (${shortHash}).`);
+  };
+
+  const handleAction = async (card: MarketCard, action: MarketAction) => {
+    setActionError(null);
+    setActionMessage(null);
+
+    if (!walletAddress || !executor) {
+      setActionError('Connect OneWallet to execute marketplace transactions.');
+      return;
+    }
+
+    const inventoryObjectId = (inventoryObjectIds[card.id] || '').trim();
+    const listingObjectId = (listingObjectIds[card.id] || '').trim();
+
+    setCardBusy(card.id, true);
+    try {
+      if (action === 'sell') {
+        if (!inventoryObjectId) {
+          throw new Error('Set Inventory NFT object id before listing for sale.');
+        }
+        const result = await listInventoryForSale({
+          sellerAddress: walletAddress,
+          inventoryNftObjectId: inventoryObjectId,
+          priceOne: card.buyPrice,
+        }, executor);
+        reportResult(card, action, result);
+        if (result.objectId) {
+          writeListingObjectId(card.id, result.objectId);
+        }
+        return;
+      }
+
+      if (action === 'buy') {
+        if (!listingObjectId) {
+          throw new Error('Set Sale Listing object id before buying.');
+        }
+        const result = await buySaleListing({
+          buyerAddress: walletAddress,
+          saleListingObjectId: listingObjectId,
+          priceOne: card.buyPrice,
+        }, executor);
+        reportResult(card, action, result);
+        return;
+      }
+
+      if (action === 'rent_out') {
+        if (!inventoryObjectId) {
+          throw new Error('Set Inventory NFT object id before creating a rental listing.');
+        }
+        const result = await listInventoryForRent({
+          lenderAddress: walletAddress,
+          inventoryNftObjectId: inventoryObjectId,
+          rentPriceOne: card.rentPrice,
+          collateralOne: Math.max(0.01, Number((card.rentPrice * 2).toFixed(2))),
+          durationMs: 24 * 60 * 60 * 1000,
+        }, executor);
+        reportResult(card, action, result);
+        if (result.objectId) {
+          writeListingObjectId(card.id, result.objectId);
+        }
+        return;
+      }
+
+      if (!listingObjectId) {
+        throw new Error('Set Rental Listing object id before starting a rental.');
+      }
+      const result = await startRental({
+        renterAddress: walletAddress,
+        rentalListingObjectId: listingObjectId,
+        rentPriceOne: card.rentPrice,
+        collateralOne: Math.max(0.01, Number((card.rentPrice * 2).toFixed(2))),
+      }, executor);
+      reportResult(card, action, result);
+    } catch (error: any) {
+      setActionError(error?.message || 'Marketplace transaction failed.');
+    } finally {
+      setCardBusy(card.id, false);
+    }
+  };
+
+  const renderCards = () => (
+    <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+      {visibleCards.map((item) => (
+        <MarketCardItem
+          key={item.id}
+          item={item}
+          inventoryObjectId={inventoryObjectIds[item.id] || ''}
+          listingObjectId={listingObjectIds[item.id] || ''}
+          onInventoryObjectIdChange={(value) => writeInventoryObjectId(item.id, value)}
+          onListingObjectIdChange={(value) => writeListingObjectId(item.id, value)}
+          onAction={handleAction}
+          isActionBusy={Boolean(actionStateByCard[item.id]) || isWalletExecuting}
+        />
+      ))}
+    </div>
+  );
 
   return (
     <main className="relative h-full overflow-y-auto bg-[#090909] text-stone-100">
@@ -328,6 +491,9 @@ export default function MarketplacePage() {
             <p className="mt-3 max-w-3xl text-[0.95rem] leading-7 text-stone-400">
               Trade lore-linked NFT assets from your campaign history: buy legendary cards, list your own cards for sale, rent out high-tier gear, or acquire rentals for your next run.
             </p>
+            <p className="mt-2 text-[0.72rem] uppercase tracking-[0.14em] text-stone-500">
+              Set onchain object ids directly in each card to execute real contract actions.
+            </p>
           </div>
           <Link
             href="/game"
@@ -339,6 +505,11 @@ export default function MarketplacePage() {
 
         <Card className="mb-8 rounded-[22px] border-white/8 bg-[linear-gradient(180deg,rgba(18,18,22,0.92),rgba(11,11,13,0.96))] py-4">
           <CardContent className="px-4 md:px-6">
+            {(actionMessage || actionError) && (
+              <div className={`mb-3 rounded-lg border px-3 py-2 text-[0.72rem] tracking-[0.08em] ${actionError ? 'border-red-500/35 bg-red-500/8 text-red-200' : 'border-emerald-500/35 bg-emerald-500/10 text-emerald-100'}`}>
+                {actionError || actionMessage}
+              </div>
+            )}
             <div className="grid gap-3 md:grid-cols-[1fr_auto_auto]">
               <div className="relative">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-500" />
@@ -410,36 +581,20 @@ export default function MarketplacePage() {
                 </CardContent>
               </Card>
             ) : (
-              <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
-                {visibleCards.map((item) => (
-                  <MarketCardItem key={item.id} item={item} />
-                ))}
-              </div>
+              renderCards()
             )}
           </TabsContent>
 
           <TabsContent value="sell">
-            <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
-              {visibleCards.map((item) => (
-                <MarketCardItem key={item.id} item={item} />
-              ))}
-            </div>
+            {renderCards()}
           </TabsContent>
 
           <TabsContent value="lend">
-            <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
-              {visibleCards.map((item) => (
-                <MarketCardItem key={item.id} item={item} />
-              ))}
-            </div>
+            {renderCards()}
           </TabsContent>
 
           <TabsContent value="rent">
-            <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
-              {visibleCards.map((item) => (
-                <MarketCardItem key={item.id} item={item} />
-              ))}
-            </div>
+            {renderCards()}
           </TabsContent>
         </Tabs>
       </section>

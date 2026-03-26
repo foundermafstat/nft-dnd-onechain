@@ -3,6 +3,7 @@ import { startGame } from '@/lib/OneChain';
 import { useGameState } from '@/store/useGameState';
 import { Scroll, Wallet, CheckCircle2, AlertTriangle, ShieldX } from 'lucide-react';
 import { quoteAdventurePrepay } from '@/lib/onechainEconomy';
+import { useOnechainWalletExecutor } from '@/hooks/useOnechainWalletExecutor';
 
 interface QuestBoardProps {
 	playerId: string;
@@ -12,16 +13,26 @@ interface QuestBoardProps {
 
 export default function QuestBoard({ playerId, walletAddress, onClose }: QuestBoardProps) {
 	const { testQuestState, setTestQuestState, setTestQuestSessionId, addMessage } = useGameState();
+	const { executor, isExecuting: isWalletExecuting } = useOnechainWalletExecutor();
 	const [isLoading, setIsLoading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const quote = quoteAdventurePrepay({ generationCount: 3, mintableDropsEstimate: 1 });
 
 	const handleStartQuest = async () => {
+		if (!executor) {
+			setError('Wallet signer is unavailable. Reconnect OneWallet and retry.');
+			return;
+		}
+
 		setIsLoading(true);
 		setError(null);
 
 		try {
-			const result = await startGame(walletAddress, { generationCount: 3, mintableDropsEstimate: 1 });
+			const result = await startGame(
+				walletAddress,
+				executor,
+				{ generationCount: 3, mintableDropsEstimate: 1 },
+			);
 
 			if (result.success) {
 				setTestQuestState('started');
@@ -139,7 +150,7 @@ export default function QuestBoard({ playerId, walletAddress, onClose }: QuestBo
 				{testQuestState === 'not_started' ? (
 					<button
 						onClick={handleStartQuest}
-						disabled={isLoading}
+						disabled={isLoading || isWalletExecuting || !executor}
 						className="w-full relative group perspective-1000"
 					>
 						<div className="absolute -inset-[1px] rounded-xl bg-gradient-to-r from-amber-600 via-amber-400 to-amber-700 opacity-40 group-hover:opacity-100 transition duration-500 blur-sm group-hover:blur-md"></div>
@@ -150,7 +161,7 @@ export default function QuestBoard({ playerId, walletAddress, onClose }: QuestBo
 								<Wallet className="w-5 h-5 text-amber-500" />
 							)}
 							<span className="font-bold font-cinzel tracking-[0.2em] text-amber-50 uppercase shadow-sm">
-								{isLoading ? 'Opening Session...' : 'Begin Trial'}
+								{isLoading || isWalletExecuting ? 'Opening Session...' : 'Begin Trial'}
 							</span>
 						</div>
 					</button>

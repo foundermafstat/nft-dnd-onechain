@@ -109,6 +109,9 @@ You can also use:
 pnpm --dir contracts deploy:testnet
 ```
 
+The deploy script uses `--skip-fetch-latest-git-deps` and
+`--skip-dependency-verification` by default for OneChain CLI compatibility.
+
 ## After deploy
 
 Copy the important values from publish output into `contract-config.json`:
