@@ -89,7 +89,7 @@ export interface GameItem {
     rarity: ItemRarity;
     is_nft: boolean;
     blockchain_status: BlockchainStatus;
-    stellar_token_id?: string;
+    onechain_token_id?: string;
     cost_gp: number;
     slots: number;
     stats: WeaponStats | ArmorStats | GearStats | MagicStats;

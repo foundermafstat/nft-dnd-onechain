@@ -1,18 +1,15 @@
 module nft_dnd::registry;
 
-use one::object::{Self, UID};
-use one::transfer;
-use one::tx_context::{Self, TxContext};
 use std::string::String;
 
 public struct Registry has key {
-    id: UID,
+    id: object::UID,
     items_minted: u64,
     badges_issued: u64,
 }
 
 public struct LegendaryItem has key, store {
-    id: UID,
+    id: object::UID,
     name: String,
     rarity_tier: u8,
     ipfs_cid: String,
@@ -20,7 +17,7 @@ public struct LegendaryItem has key, store {
 }
 
 public struct ChronicleBadge has key, store {
-    id: UID,
+    id: object::UID,
     title: String,
     event_summary: String,
 }

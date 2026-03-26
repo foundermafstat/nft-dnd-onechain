@@ -1,0 +1,14 @@
+{
+  "network": "onechain-testnet",
+  "packageName": "nft_dnd",
+  "packageId": "",
+  "deployerAddress": "",
+  "registryObjectId": "",
+  "upgradeCapId": "",
+  "transactionDigest": "",
+  "deployedAt": "",
+  "notes": {
+    "description": "NFT-DND on-chain registry for AI-generated legendary items and chronicle badges",
+    "market": "onechain-testnet"
+  }
+}

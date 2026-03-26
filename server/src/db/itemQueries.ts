@@ -9,7 +9,7 @@ export interface ItemData {
     rarity: string;
     is_nft?: boolean;
     blockchain_status?: string;
-    stellar_token_id?: string;
+    onechain_token_id?: string;
     cost_gp: number;
     slots: number;
     stats: Record<string, any>;

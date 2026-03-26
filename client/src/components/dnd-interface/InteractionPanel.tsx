@@ -3,7 +3,7 @@ import { useGameState, ChatMessage } from '@/store/useGameState';
 import { useDroppable } from '@dnd-kit/core';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Button } from '@/components/ui/button';
-import { Backpack, Users, Send, User, Sparkles, Dices, ShieldAlert, CheckCircle2, X, Bot, WandSparkles } from 'lucide-react';
+import { Backpack, Users, Send, User, Sparkles, Dices, ShieldAlert, CheckCircle2, X, Bot } from 'lucide-react';
 import DraggableItem from './DraggableItem';
 import { DiceType } from '@/components/DiceOverlay';
 import { SERVER_URL } from '@/lib/config';
@@ -35,7 +35,6 @@ export default function InteractionPanel({ triggerRoll }: InteractionPanelProps)
 		chatMessages,
 		addMessage,
 		currentTurn,
-		setTurn,
 		activeNpc,
 		setActiveNpc,
 		entities,
@@ -43,11 +42,10 @@ export default function InteractionPanel({ triggerRoll }: InteractionPanelProps)
 		setTestQuestState,
 		testQuestSessionId
 	} = useGameState();
-	const { playerId, walletAddress } = useAuth();
+	const { walletAddress } = useAuth();
 	const [inputText, setInputText] = useState('');
 	const [isSendingDialog, setIsSendingDialog] = useState(false);
 	const [isEndingQuest, setIsEndingQuest] = useState(false);
-	const [hasRolled, setHasRolled] = useState(false);
 	const [activeMenu, setActiveMenu] = useState<'inventory' | 'party' | 'playerInfo' | 'skills' | 'dice' | null>(null);
 	const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -151,12 +149,6 @@ export default function InteractionPanel({ triggerRoll }: InteractionPanelProps)
 		}
 	};
 
-	// Trigger generic dice roll
-	const handleDiceRollLocal = (sides: number) => {
-		setHasRolled(true);
-		triggerRoll(`d${sides}` as any);
-	};
-
 	// Trigger Hackathon Test Quest ZK Simulation
 	const handleZkLootRoll = () => {
 		if (testQuestState !== 'combat') {
@@ -202,59 +194,51 @@ export default function InteractionPanel({ triggerRoll }: InteractionPanelProps)
 				ref={setChatDropRef}
 				className={`relative flex min-h-0 flex-1 flex-col overflow-hidden transition-colors duration-500 ${isChatOver ? 'bg-amber-900/10 ring-1 ring-inset ring-amber-500/40 shadow-[inset_0_0_60px_rgba(245,158,11,0.12)]' : ''}`}
 			>
-				<div className="sticky top-0 z-10 shrink-0 border-b border-white/6 bg-[linear-gradient(180deg,rgba(14,14,16,0.96),rgba(11,11,12,0.88))] px-5 py-4 shadow-[0_14px_28px_rgba(0,0,0,0.24)] backdrop-blur-2xl">
-					<div className="flex items-start justify-between gap-3">
-						<div className="flex items-start gap-3">
-							<div className="mt-0.5 flex h-10 w-10 items-center justify-center rounded-2xl border border-amber-400/14 bg-[linear-gradient(180deg,rgba(63,48,27,0.46),rgba(19,18,16,0.92))] text-amber-200 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
-								<Bot className="h-4 w-4" />
+				<div className="sticky top-0 z-10 shrink-0 border-b border-white/6 bg-[linear-gradient(180deg,rgba(14,14,16,0.96),rgba(11,11,12,0.88))] px-4 py-3 shadow-[0_10px_22px_rgba(0,0,0,0.22)] backdrop-blur-2xl">
+					<div className="flex items-center justify-between gap-3">
+						<div className="flex items-center gap-3">
+							<div className="flex h-8 w-8 items-center justify-center rounded-xl border border-amber-400/14 bg-[linear-gradient(180deg,rgba(63,48,27,0.46),rgba(19,18,16,0.92))] text-amber-200 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
+								<Bot className="h-3.5 w-3.5" />
 							</div>
 							<div>
 								<div className="text-[0.6rem] font-inter font-semibold uppercase tracking-[0.32em] text-stone-500">
 									AI Dungeon Master
 								</div>
-								<h2 className="mt-1 font-cinzel text-[1.05rem] font-semibold tracking-[0.08em] text-stone-100">
+								<h2 className="mt-0.5 font-cinzel text-[0.96rem] font-semibold tracking-[0.08em] text-stone-100">
 									Adventure Log
 								</h2>
-								<p className="mt-1 max-w-[26rem] text-[0.76rem] leading-relaxed text-stone-500">
-									Dialogue, system events and contextual AI responses appear here in a calmer command-console layout.
-								</p>
 							</div>
 						</div>
 
-						<div className="flex flex-col items-end gap-2">
-							<div className="rounded-full border border-white/7 bg-white/[0.03] px-3 py-1 text-[0.58rem] font-inter font-semibold uppercase tracking-[0.28em] text-stone-400">
-								{activeNpc ? `Linked: ${activeNpc.name}` : 'Open Channel'}
+						{activeNpc && (
+							<div className="rounded-full border border-white/7 bg-white/[0.03] px-3 py-1 text-[0.56rem] font-inter font-semibold uppercase tracking-[0.24em] text-stone-400">
+								Linked: {activeNpc.name}
 							</div>
-							{isChatOver && (
-								<span className="rounded-full border border-amber-400/20 bg-amber-400/[0.08] px-3 py-1 text-[0.58rem] font-inter font-semibold uppercase tracking-[0.28em] text-amber-300 animate-pulse">
-									Drop to use
-								</span>
-							)}
-						</div>
+						)}
 					</div>
 				</div>
 
 				<ScrollArea viewportRef={scrollRef} className="flex-1 min-h-0 bg-[linear-gradient(180deg,rgba(21,21,23,0.88),rgba(13,13,15,0.95))]">
-					<div className="space-y-6 px-5 pb-6 pt-6">
+					<div className="space-y-5 px-4 pb-5 pt-5">
 						{chatMessages.map(msg => (
 							<div key={msg.id} className={`flex flex-col ${msg.senderType === 'player' ? 'items-end' : 'items-start'} mb-2`}>
 
-								<div className={`mb-2 flex items-baseline gap-2 ${msg.senderType === 'player' ? 'flex-row-reverse' : ''}`}>
+								<div className={`mb-1.5 flex items-baseline gap-2 ${msg.senderType === 'player' ? 'flex-row-reverse' : ''}`}>
 									<button
 										onClick={() => handleNameClick(msg)}
-										className="cursor-pointer text-[0.58rem] font-inter font-semibold uppercase tracking-[0.28em] text-stone-500 transition-colors hover:text-amber-300"
+										className="cursor-pointer text-[0.54rem] font-inter font-semibold uppercase tracking-[0.24em] text-stone-500 transition-colors hover:text-amber-300"
 									>
 										{msg.sender}
 									</button>
 
 									{msg.flavorText && (
-										<span className="max-w-[65%] text-left text-[0.68rem] italic leading-tight tracking-wide text-stone-500/80">
+										<span className="max-w-[65%] text-left text-[0.64rem] italic leading-tight tracking-wide text-stone-500/80">
 											{msg.flavorText}
 										</span>
 									)}
 								</div>
 
-								<div className={`max-w-[88%] break-words rounded-[1.4rem] border px-4 py-3.5 text-[0.84rem] leading-[1.65] shadow-[0_12px_24px_rgba(0,0,0,0.18)] ${getMessageTone(msg.senderType)}`}>
+								<div className={`max-w-[88%] break-words rounded-[1.25rem] border px-4 py-3 text-[0.82rem] leading-[1.6] shadow-[0_10px_22px_rgba(0,0,0,0.16)] ${getMessageTone(msg.senderType)}`}>
 									<div>{msg.content}</div>
 
 									{/* Render Spawned Item in Chat (Draggable) */}
@@ -292,7 +276,7 @@ export default function InteractionPanel({ triggerRoll }: InteractionPanelProps)
 			)}
 
 			{/* 3. Control Panel (Fixed Bottom) */}
-			<div className="relative z-30 shrink-0 border-t border-white/6 bg-[linear-gradient(180deg,rgba(14,14,16,0.98),rgba(9,9,11,0.98))] px-5 pb-5 pt-4 shadow-[0_-10px_28px_rgba(0,0,0,0.42)]">
+			<div className="relative z-30 shrink-0 border-t border-white/6 bg-[linear-gradient(180deg,rgba(14,14,16,0.98),rgba(9,9,11,0.98))] px-4 pb-4 pt-3 shadow-[0_-10px_28px_rgba(0,0,0,0.42)]">
 				<div className="absolute top-0 inset-x-0 h-[1px] bg-gradient-to-r from-transparent via-amber-500/40 to-transparent"></div>
 
 				{/* Dice & Quick Actions */}
@@ -380,19 +364,9 @@ export default function InteractionPanel({ triggerRoll }: InteractionPanelProps)
 				)}
 
 				{/* Text Input */}
-				<div className="rounded-[28px] border border-white/6 bg-[linear-gradient(180deg,rgba(15,15,17,0.98),rgba(10,10,11,0.98))] p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.04),0_18px_32px_rgba(0,0,0,0.3)]">
-					<div className="mb-3 flex items-center justify-between gap-3">
-						<div className="flex items-center gap-2 text-[0.58rem] font-inter font-semibold uppercase tracking-[0.28em] text-stone-500">
-							<WandSparkles className="h-3.5 w-3.5 text-amber-300/80" />
-							Response Channel
-						</div>
-						<div className="rounded-full border border-white/7 bg-white/[0.03] px-3 py-1 text-[0.58rem] font-inter font-semibold uppercase tracking-[0.28em] text-stone-400">
-							{currentTurn === 'player' ? 'Ready' : 'Locked'}
-						</div>
-					</div>
-
+				<div className="rounded-[24px] border border-white/6 bg-[linear-gradient(180deg,rgba(15,15,17,0.98),rgba(10,10,11,0.98))] p-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04),0_18px_32px_rgba(0,0,0,0.3)]">
 					<div className="relative flex items-center gap-3">
-						<div className={`flex h-14 flex-1 items-center gap-2 rounded-[22px] border px-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] transition-all bg-[linear-gradient(180deg,rgba(10,10,11,0.98),rgba(16,16,18,0.96))] ${activeNpc || isSendingDialog ? 'border-amber-500/40 ring-1 ring-amber-500/25' : 'border-white/8 focus-within:border-amber-500/28 focus-within:ring-1 focus-within:ring-amber-500/24'}`}>
+						<div className={`flex h-13 flex-1 items-center gap-2 rounded-[20px] border px-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] transition-all bg-[linear-gradient(180deg,rgba(10,10,11,0.98),rgba(16,16,18,0.96))] ${activeNpc || isSendingDialog ? 'border-amber-500/40 ring-1 ring-amber-500/25' : 'border-white/8 focus-within:border-amber-500/28 focus-within:ring-1 focus-within:ring-amber-500/24'}`}>
 						{activeNpc && (
 							<div className="group/badge flex shrink-0 items-center gap-2 rounded-2xl border border-amber-400/18 bg-amber-400/[0.08] py-1.5 pl-3 pr-1.5 text-amber-200 shadow-[0_0_18px_rgba(245,158,11,0.08)]">
 								<span className="text-[10px] font-cinzel font-bold uppercase tracking-widest flex items-center gap-1.5">
@@ -408,7 +382,7 @@ export default function InteractionPanel({ triggerRoll }: InteractionPanelProps)
 							</div>
 						)}
 						<input
-							className="h-full flex-1 border-none bg-transparent text-[0.88rem] text-stone-100 placeholder:text-stone-500 font-inter outline-none"
+							className="h-full flex-1 border-none bg-transparent text-[0.84rem] text-stone-100 placeholder:text-stone-500 font-inter outline-none"
 							placeholder={
 								isSendingDialog ? `${activeNpc?.name} is responding...` :
 									activeNpc ? `Type message...` :
@@ -424,7 +398,7 @@ export default function InteractionPanel({ triggerRoll }: InteractionPanelProps)
 						<Button
 							onClick={handleSend}
 							disabled={!inputText.trim() || currentTurn !== 'player' || isSendingDialog}
-							className="group h-14 rounded-[22px] border border-amber-400/20 bg-[linear-gradient(180deg,rgba(110,78,35,0.96),rgba(63,45,22,0.98))] px-5 text-[0.68rem] font-inter font-semibold uppercase tracking-[0.24em] text-amber-50 shadow-[0_14px_28px_rgba(64,41,15,0.34)] transition-all duration-300 hover:-translate-y-0.5 hover:border-amber-200/36 hover:shadow-[0_18px_34px_rgba(64,41,15,0.4)] disabled:opacity-50"
+							className="group h-13 rounded-[20px] border border-amber-400/20 bg-[linear-gradient(180deg,rgba(110,78,35,0.96),rgba(63,45,22,0.98))] px-4 text-[0.64rem] font-inter font-semibold uppercase tracking-[0.22em] text-amber-50 shadow-[0_14px_28px_rgba(64,41,15,0.34)] transition-all duration-300 hover:border-amber-200/36 hover:shadow-[0_18px_34px_rgba(64,41,15,0.4)] disabled:opacity-50"
 						>
 							{isSendingDialog ? (
 								<span className="flex gap-1">

@@ -10,7 +10,7 @@ interface AuthButtonProps {
     variant?: 'default' | 'hero' | 'footer';
 }
 
-export default function FreighterAuthButton({ onAuthenticated, variant = 'default' }: AuthButtonProps) {
+export default function OneWalletAuthButton({ onAuthenticated, variant = 'default' }: AuthButtonProps) {
     const account = useCurrentAccount();
     const { currentWallet } = useCurrentWallet();
     const { playerId, walletAddress, isLoading } = useAuth();
@@ -41,7 +41,6 @@ export default function FreighterAuthButton({ onAuthenticated, variant = 'defaul
                         </button>
                     }
                 />
-                <p className="mt-3 text-center text-xs font-inter text-stone-500">{helperText}</p>
             </div>
         );
     }

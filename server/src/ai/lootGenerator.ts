@@ -31,7 +31,7 @@ export class LootGenerator {
             category: ItemCategory.Weapon,
             subcategory: ItemSubcategory.Melee,
             rarity: aiLoot.rarity,
-            is_nft: false, // Must be explicitly minted on Stellar later
+            is_nft: false, // Must be explicitly minted on OneChain later
             blockchain_status: BlockchainStatus.OffChain,
             cost_gp: Math.floor(playerLevel * 50 * this.getRarityMultiplier(aiLoot.rarity)),
             slots: 1,

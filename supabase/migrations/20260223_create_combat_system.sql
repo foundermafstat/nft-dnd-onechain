@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS fate_pools (
     entity_id TEXT NOT NULL,
     current_index INTEGER NOT NULL DEFAULT 0,
     pool_values INTEGER[] NOT NULL DEFAULT '{}',   -- Pre-generated random values (1-100)
-    merkle_root TEXT,                               -- For future ZK verification on Stellar
+    merkle_root TEXT,                               -- For future ZK verification on OneChain
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 

@@ -14,7 +14,7 @@
 | Primary Purpose | Pre-production blueprint for gameplay, backend, AI, economy, blockchain, and live ops |
 | Product Positioning | Real-time multiplayer AI-directed fantasy RPG with selective on-chain permanence |
 
-**Document intent.** This version replaces earlier assumptions with a OneChain-first architecture while preserving the core concept: a real-time multiplayer AI-directed fantasy RPG where meaningful ownership, public history, and selective trust guarantees are anchored on-chain.
+**Document intent.** This version with a OneChain-first architecture while preserving the core concept: a real-time multiplayer AI-directed fantasy RPG where meaningful ownership, public history, and selective trust guarantees are anchored on-chain.
 
 ---
 
@@ -100,11 +100,11 @@ NFT-DND takes place in a fractured dark-fantasy realm built around shifting fron
 
 ```mermaid
 flowchart LR
-		A["Starting Pressure"] --> B["Complication"]
-		B --> C["Midpoint Escalation"]
-		C --> D["Branch / Player Decision"]
-		D --> E["Climax"]
-		E --> F["Run Summary / Consequence"]
+    A["Starting Pressure"] --> B["Complication"]
+    B --> C["Midpoint Escalation"]
+    C --> D["Branch / Player Decision"]
+    D --> E["Climax"]
+    E --> F["Run Summary / Consequence"]
 ```
 
 The AI Director may improvise around this dramatic spine, but it should not abandon it casually. If players break assumptions, the system should route them into a valid successor state that preserves stakes instead of punishing creativity.
@@ -127,13 +127,13 @@ The minute-to-minute loop combines movement, combat, loot evaluation, short expl
 
 ```mermaid
 flowchart LR
-		A["Party Formation"] --> B["Loadout Lock"]
-		B --> C["Narrative Framing"]
-		C --> D["Exploration / Encounters"]
-		D --> E["Combat / Choice / Branch"]
-		E --> F["Boss / Extraction / Retreat"]
-		F --> G["Post-Run Summary"]
-		G --> H["Mint / Chronicle / Market Eligibility"]
+    A["Party Formation"] --> B["Loadout Lock"]
+    B --> C["Narrative Framing"]
+    C --> D["Exploration / Encounters"]
+    D --> E["Combat / Choice / Branch"]
+    E --> F["Boss / Extraction / Retreat"]
+    F --> G["Post-Run Summary"]
+    G --> H["Mint / Chronicle / Market Eligibility"]
 ```
 
 ### Standard Run Structure
@@ -274,15 +274,15 @@ The AI layer acts as a dungeon master, narrative editor, and context interpreter
 
 ```mermaid
 flowchart TD
-		A["World State Tracker"] --> E["Narrative Director Service"]
-		B["Lore Memory / Retrieval"] --> E
-		C["Player Behavior Analyzer"] --> E
-		D["Encounter / Difficulty Module"] --> E
-		E --> F["Schema-Bound Output"]
-		F --> G["Game Engine"]
-		F --> H["Dialogue / Flavor Text"]
-		G --> I["Client Presentation"]
-		H --> I
+    A["World State Tracker"] --> E["Narrative Director Service"]
+    B["Lore Memory / Retrieval"] --> E
+    C["Player Behavior Analyzer"] --> E
+    D["Encounter / Difficulty Module"] --> E
+    E --> F["Schema-Bound Output"]
+    F --> G["Game Engine"]
+    F --> H["Dialogue / Flavor Text"]
+    G --> I["Client Presentation"]
+    H --> I
 ```
 
 ### Core Services
@@ -485,10 +485,10 @@ The earlier concept imagined more direct generic zero-knowledge verification. Th
 
 ```mermaid
 flowchart LR
-		A["Client Commits Hidden Action"] --> B["Off-Chain Verifier / Rule Check"]
-		B --> C["Validity Result"]
-		C --> D["On-Chain Attestation / Success Event"]
-		D --> E["Claim / Reward / Chronicle Hook"]
+    A["Client Commits Hidden Action"] --> B["Off-Chain Verifier / Rule Check"]
+    B --> C["Validity Result"]
+    C --> D["On-Chain Attestation / Success Event"]
+    D --> E["Claim / Reward / Chronicle Hook"]
 ```
 
 ### Sponsored Transactions
@@ -522,14 +522,14 @@ If the system stores objects on-chain but never presents their history compellin
 
 ```mermaid
 flowchart TD
-		A["Web Client"] --> B["Realtime Game Backend"]
-		B --> C["Simulation / Match / Room Servers"]
-		B --> D["Persistence Layer"]
-		B --> E["AI Orchestration Stack"]
-		B --> F["Chain Integration Service"]
-		F --> G["OneChain RPC"]
-		G --> H["Indexer / Analytics"]
-		E --> I["Model APIs + Retrieval"]
+    A["Web Client"] --> B["Realtime Game Backend"]
+    B --> C["Simulation / Match / Room Servers"]
+    B --> D["Persistence Layer"]
+    B --> E["AI Orchestration Stack"]
+    B --> F["Chain Integration Service"]
+    F --> G["OneChain RPC"]
+    G --> H["Indexer / Analytics"]
+    E --> I["Model APIs + Retrieval"]
 ```
 
 ### Platform Components

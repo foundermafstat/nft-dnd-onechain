@@ -17,6 +17,7 @@ import {
 import type { LucideIcon } from "lucide-react";
 import FreighterAuthButton from "./OneWalletAuthButton";
 import { useEffect, useRef, useState } from "react";
+import OneWalletAuthButton from './OneWalletAuthButton';
 
 function useIntersectionObserver(options = {}) {
 	const [isIntersecting, setIsIntersecting] = useState(false);
@@ -254,7 +255,7 @@ export default function WelcomeScreen({ onAuth }: WelcomeScreenProps) {
 					</FadeIn>
 
 					<FadeIn delay={500} direction="up">
-						<p className="mb-10 max-w-4xl text-lg font-light leading-relaxed text-stone-300 drop-shadow-md md:text-2xl">
+						<p className="mb-10 max-w-4xl text-md font-light leading-relaxed text-stone-300 drop-shadow-md md:text-xl">
 							A cinematic blockchain RPG where the <strong className="font-medium text-amber-100">AI writes the lore around your choices</strong>, and the rare items born from that lore become on-chain NFTs you can use, trade and lease inside the living world economy.
 						</p>
 					</FadeIn>
@@ -285,11 +286,11 @@ export default function WelcomeScreen({ onAuth }: WelcomeScreenProps) {
 					<FadeIn delay={700} direction="up">
 						<div className="flex w-full flex-col items-center justify-center gap-8 sm:flex-row">
 							<div className="group relative z-50 perspective-1000">
-								<FreighterAuthButton onAuthenticated={onAuth} variant="hero" />
+								<OneWalletAuthButton onAuthenticated={onAuth} variant="hero" />
 							</div>
 
 							<a href="#world-loop" className="group flex items-center gap-2 pt-2 font-cinzel text-sm font-bold uppercase tracking-[0.2em] text-amber-700/80 transition-colors hover:text-amber-400 sm:pt-0">
-								Explore the loop <ChevronDown className="h-4 w-4 transition-transform group-hover:translate-y-1" />
+								Explore the loop <ChevronDown className="h-4 w-4 transition-transform" />
 							</a>
 						</div>
 					</FadeIn>

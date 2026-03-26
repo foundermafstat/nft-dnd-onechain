@@ -136,7 +136,7 @@ CREATE TABLE public.items (
   rarity text NOT NULL DEFAULT 'Common'::text,
   is_nft boolean DEFAULT false,
   blockchain_status text DEFAULT 'OFF_CHAIN'::text,
-  stellar_token_id text,
+  onechain_token_id text,
   cost_gp integer DEFAULT 0,
   slots integer DEFAULT 1,
   stats jsonb DEFAULT '{}'::jsonb,

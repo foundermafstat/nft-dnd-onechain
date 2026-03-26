@@ -1,0 +1,20 @@
+# Move build artifacts
+build/
+*.mv
+*.abi
+Move.lock
+
+# OneChain CLI local state
+.one/
+.sui/
+
+# Turbo / package artifacts
+.turbo/
+dist/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store

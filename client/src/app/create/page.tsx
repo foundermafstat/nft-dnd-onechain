@@ -223,8 +223,8 @@ export default function CreateHeroPage() {
                 throw new Error(err.error || 'Failed to create character');
             }
 
-            // Redirect to hub
-            router.push('/');
+            // Redirect to game
+            router.push('/game');
         } catch (error: any) {
             console.error(error);
             alert(`Error: ${error.message}`);

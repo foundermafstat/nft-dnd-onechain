@@ -17,7 +17,7 @@ CREATE TABLE public.items (
     rarity text NOT NULL DEFAULT 'Common',  -- Common, Uncommon, Rare, Epic, Legendary
     is_nft boolean DEFAULT false,
     blockchain_status text DEFAULT 'OFF_CHAIN',  -- OFF_CHAIN, MINTABLE, MINTED
-    stellar_token_id text,               -- OneChain NFT token ID when minted
+    onechain_token_id text,               -- OneChain NFT token ID when minted
 
     -- Cost & weight
     cost_gp integer DEFAULT 0,           -- Price in gold pieces
