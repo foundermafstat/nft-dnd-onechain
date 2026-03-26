@@ -233,7 +233,7 @@ export default function CreateHeroPage() {
     };
 
     return (
-        <div className="absolute inset-0 w-full h-full bg-[#050505] text-amber-50 overflow-y-auto custom-scrollbar selection:bg-amber-900/50 selection:text-amber-100 font-inter">
+        <div className="relative h-full w-full overflow-y-auto bg-[#050505] text-amber-50 custom-scrollbar selection:bg-amber-900/50 selection:text-amber-100 font-inter">
             {/* Background Texture */}
             <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_rgba(245,158,11,0.05)_0%,_transparent_100%)] pointer-events-none fixed"></div>
 

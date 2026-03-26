@@ -3,6 +3,7 @@ import { Cinzel, Manrope } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/context/AuthContext";
 import { OnechainProviders } from "@/components/OnechainProviders";
+import GlobalNavbar from "@/components/GlobalNavbar";
 
 const cinzel = Cinzel({
   variable: "--font-cinzel",
@@ -29,11 +30,16 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark">
       <body
-        className={`${cinzel.variable} ${manrope.variable} antialiased`}
+        className={`${cinzel.variable} ${manrope.variable} h-screen overflow-hidden antialiased`}
       >
         <OnechainProviders>
           <AuthProvider>
-            {children}
+            <div className="flex h-full flex-col">
+              <GlobalNavbar />
+              <div className="min-h-0 flex-1">
+                {children}
+              </div>
+            </div>
           </AuthProvider>
         </OnechainProviders>
       </body>

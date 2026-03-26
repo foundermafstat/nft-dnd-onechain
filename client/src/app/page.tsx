@@ -43,14 +43,14 @@ export default function Home() {
   // Don't flash the welcome screen while checking localStorage or characters
   if (isLoading || isLoadingChars) {
     return (
-      <main className="flex flex-col h-screen overflow-hidden bg-[#050505] text-amber-50 font-inter items-center justify-center">
+      <main className="flex h-full flex-col items-center justify-center overflow-hidden bg-[#050505] text-amber-50 font-inter">
         <div className="w-12 h-12 border-2 border-amber-600 border-t-transparent rounded-full animate-spin drop-shadow-[0_0_15px_rgba(245,158,11,0.5)]" />
       </main>
     );
   }
 
   return (
-    <main className="flex flex-col h-screen overflow-hidden bg-black text-amber-50 font-inter selection:bg-amber-900/50 selection:text-amber-100">
+    <main className="flex h-full flex-col overflow-hidden bg-black text-amber-50 font-inter selection:bg-amber-900/50 selection:text-amber-100">
       <div className="flex-1 relative w-full h-full bg-[#050505] shadow-[inset_0_0_100px_rgba(0,0,0,0.8)]">
         <WelcomeScreen onAuth={setAuth} />
       </div>

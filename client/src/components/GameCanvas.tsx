@@ -162,7 +162,7 @@ export default function GameCanvas({ playerId }: GameCanvasProps) {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ locationId: locId, tileX, tileY }),
-        }).catch(console.error);
+        }).catch(() => { /* silent — network failures are transient */ });
     }
 
     // ── Subscribe to per-location channel ──────────────────────────────

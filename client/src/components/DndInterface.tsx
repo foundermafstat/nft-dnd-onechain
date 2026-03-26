@@ -3,7 +3,6 @@ import { DndContext, DragEndEvent, DragStartEvent, DragOverlay, pointerWithin } 
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
 import GameCanvas from '@/components/GameCanvas';
 import DiceOverlay, { DiceType } from '@/components/DiceOverlay';
-import Header from './dnd-interface/Header';
 import InteractionPanel from './dnd-interface/InteractionPanel';
 import DraggableItem from './dnd-interface/DraggableItem';
 import { useGameState } from '@/store/useGameState';
@@ -148,14 +147,12 @@ export default function DndInterface({ playerId, walletAddress }: DndInterfacePr
 
     return (
         <DndContext onDragStart={handleDragStart} onDragEnd={handleDragEnd} collisionDetection={pointerWithin}>
-            <div className="relative flex h-screen w-full flex-col overflow-hidden bg-[#040404] text-amber-50 font-inter selection:bg-amber-900/50 selection:text-amber-100">
+            <div className="relative flex h-full w-full flex-col overflow-hidden bg-[#040404] text-amber-50 font-inter selection:bg-amber-900/50 selection:text-amber-100">
                 <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(245,158,11,0.10),transparent_28%),radial-gradient(circle_at_82%_18%,rgba(16,185,129,0.08),transparent_20%),linear-gradient(180deg,#050505_0%,#020202_100%)]" />
                 <div className="pointer-events-none absolute inset-0 opacity-40 [background-image:linear-gradient(rgba(255,255,255,0.025)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.025)_1px,transparent_1px)] [background-size:72px_72px]" />
-                {/* Global Header */}
-                <Header walletAddress={walletAddress} />
 
                 {/* Resizable Workspaces */}
-                <ResizablePanelGroup direction="horizontal" className="relative z-10 flex-1 w-full h-full">
+                <ResizablePanelGroup direction="horizontal" className="relative z-10 flex-1 h-full w-full">
 
                     {/* Left Panel: Game Canvas Area */}
                     <ResizablePanel defaultSize={60} minSize={30} className="relative h-full flex flex-col bg-[#050505]">

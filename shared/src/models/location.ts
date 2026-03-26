@@ -40,12 +40,17 @@ export interface SpawnPoint {
     label?: string; // e.g. 'entrance', 'boss_spawn', 'from_street'
 }
 
+export type ExitEdge = 'north' | 'south' | 'east' | 'west'
+                     | 'nw' | 'ne' | 'sw' | 'se'
+                     | 'center';
+
 export interface LocationExit {
     tile_x: number;
     tile_y: number;
     target_location_id: string;
     target_location_name: string;
     spawn_label: string; // which spawn point to land on in destination
+    edge?: ExitEdge;     // which map edge/corner/center this exit sits on
 }
 
 export interface LocationMap {

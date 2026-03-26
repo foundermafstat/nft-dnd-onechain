@@ -194,30 +194,13 @@ export default function InteractionPanel({ triggerRoll }: InteractionPanelProps)
 				ref={setChatDropRef}
 				className={`relative flex min-h-0 flex-1 flex-col overflow-hidden transition-colors duration-500 ${isChatOver ? 'bg-amber-900/10 ring-1 ring-inset ring-amber-500/40 shadow-[inset_0_0_60px_rgba(245,158,11,0.12)]' : ''}`}
 			>
-				<div className="sticky top-0 z-10 shrink-0 border-b border-white/6 bg-[linear-gradient(180deg,rgba(14,14,16,0.96),rgba(11,11,12,0.88))] px-4 py-3 shadow-[0_10px_22px_rgba(0,0,0,0.22)] backdrop-blur-2xl">
 					<div className="flex items-center justify-between gap-3">
-						<div className="flex items-center gap-3">
-							<div className="flex h-8 w-8 items-center justify-center rounded-xl border border-amber-400/14 bg-[linear-gradient(180deg,rgba(63,48,27,0.46),rgba(19,18,16,0.92))] text-amber-200 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
-								<Bot className="h-3.5 w-3.5" />
-							</div>
-							<div>
-								<div className="text-[0.6rem] font-inter font-semibold uppercase tracking-[0.32em] text-stone-500">
-									AI Dungeon Master
-								</div>
-								<h2 className="mt-0.5 font-cinzel text-[0.96rem] font-semibold tracking-[0.08em] text-stone-100">
-									Adventure Log
-								</h2>
-							</div>
-						</div>
-
 						{activeNpc && (
 							<div className="rounded-full border border-white/7 bg-white/[0.03] px-3 py-1 text-[0.56rem] font-inter font-semibold uppercase tracking-[0.24em] text-stone-400">
 								Linked: {activeNpc.name}
 							</div>
 						)}
 					</div>
-				</div>
-
 				<ScrollArea viewportRef={scrollRef} className="flex-1 min-h-0 bg-[linear-gradient(180deg,rgba(21,21,23,0.88),rgba(13,13,15,0.95))]">
 					<div className="space-y-5 px-4 pb-5 pt-5">
 						{chatMessages.map(msg => (
@@ -282,7 +265,7 @@ export default function InteractionPanel({ triggerRoll }: InteractionPanelProps)
 				{/* Dice & Quick Actions */}
 				<div className="mb-4 flex items-center justify-between gap-3">
 					{/* Left Actions */}
-					<div className="flex gap-2 rounded-2xl border border-white/6 bg-white/[0.02] p-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+					<div className="flex">
 						<Button
 							variant="outline"
 							size="sm"
@@ -296,7 +279,7 @@ export default function InteractionPanel({ triggerRoll }: InteractionPanelProps)
 					</div>
 
 					{/* Right Actions */}
-					<div className="flex gap-2 rounded-2xl border border-white/6 bg-white/[0.02] p-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+					<div className="flex gap-2">
 						<Button
 							variant="outline"
 							size="sm"
@@ -364,7 +347,7 @@ export default function InteractionPanel({ triggerRoll }: InteractionPanelProps)
 				)}
 
 				{/* Text Input */}
-				<div className="rounded-[24px] border border-white/6 bg-[linear-gradient(180deg,rgba(15,15,17,0.98),rgba(10,10,11,0.98))] p-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04),0_18px_32px_rgba(0,0,0,0.3)]">
+				<div className="">
 					<div className="relative flex items-center gap-3">
 						<div className={`flex h-13 flex-1 items-center gap-2 rounded-[20px] border px-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] transition-all bg-[linear-gradient(180deg,rgba(10,10,11,0.98),rgba(16,16,18,0.96))] ${activeNpc || isSendingDialog ? 'border-amber-500/40 ring-1 ring-amber-500/25' : 'border-white/8 focus-within:border-amber-500/28 focus-within:ring-1 focus-within:ring-amber-500/24'}`}>
 						{activeNpc && (
@@ -395,24 +378,24 @@ export default function InteractionPanel({ triggerRoll }: InteractionPanelProps)
 						/>
 						</div>
 
-						<Button
+						<button
 							onClick={handleSend}
 							disabled={!inputText.trim() || currentTurn !== 'player' || isSendingDialog}
-							className="group h-13 rounded-[20px] border border-amber-400/20 bg-[linear-gradient(180deg,rgba(110,78,35,0.96),rgba(63,45,22,0.98))] px-4 text-[0.64rem] font-inter font-semibold uppercase tracking-[0.22em] text-amber-50 shadow-[0_14px_28px_rgba(64,41,15,0.34)] transition-all duration-300 hover:border-amber-200/36 hover:shadow-[0_18px_34px_rgba(64,41,15,0.4)] disabled:opacity-50"
+							className="group relative h-13 rounded-[20px] border border-amber-400/30 bg-[linear-gradient(180deg,rgba(110,78,35,0.96),rgba(63,45,22,0.98))] px-6 text-[0.64rem] font-inter font-semibold uppercase tracking-[0.22em] text-amber-50 shadow-[0_14px_28px_rgba(64,41,15,0.34)] transition-all duration-300 hover:border-amber-200/50 hover:shadow-[0_18px_40px_rgba(64,41,15,0.45)] hover:bg-[linear-gradient(180deg,rgba(140,105,50,0.98),rgba(90,65,35,0.98))] hover:brightness-125 hover:-translate-y-0.5 active:translate-y-0 active:scale-95 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0 disabled:hover:brightness-100"
 						>
 							{isSendingDialog ? (
-								<span className="flex gap-1">
+								<span className="flex gap-1 justify-center">
 									<span className="h-1.5 w-1.5 animate-bounce rounded-full bg-amber-100"></span>
 									<span className="delay-100 h-1.5 w-1.5 animate-bounce rounded-full bg-amber-100"></span>
 									<span className="delay-200 h-1.5 w-1.5 animate-bounce rounded-full bg-amber-100"></span>
 								</span>
 							) : (
-								<>
+								<div className="flex items-center gap-2">
 									<span>Send</span>
 									<Send className="h-4 w-4 transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
-								</>
+								</div>
 							)}
-						</Button>
+						</button>
 					</div>
 				</div>
 			</div>
@@ -446,7 +429,6 @@ function InventoryButtonDropzone({ activeMenu, setActiveMenu }: { activeMenu: st
 			onClick={() => setActiveMenu(activeMenu === 'inventory' ? null : 'inventory')}
 		>
 			<Backpack className={`h-4 w-4 ${isOver ? 'animate-bounce text-amber-400' : ''}`} />
-			<span className="ml-2 text-xs font-cinzel font-bold tracking-widest uppercase">{activeMenu === 'inventory' ? 'Open' : ''}</span>
 		</Button>
 	);
 }

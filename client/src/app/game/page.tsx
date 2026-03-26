@@ -49,14 +49,14 @@ export default function GamePage() {
 
   if (isLoading || isLoadingChars || !playerId || !hasCharacter) {
     return (
-      <main className="flex h-screen items-center justify-center overflow-hidden bg-[#050505] text-amber-50">
+      <main className="flex h-full items-center justify-center overflow-hidden bg-[#050505] text-amber-50">
         <div className="h-12 w-12 animate-spin rounded-full border-2 border-amber-600 border-t-transparent drop-shadow-[0_0_15px_rgba(245,158,11,0.5)]" />
       </main>
     );
   }
 
   return (
-    <main className="flex h-screen flex-col overflow-hidden bg-black text-amber-50 font-inter selection:bg-amber-900/50 selection:text-amber-100">
+    <main className="flex h-full flex-col overflow-hidden bg-black text-amber-50 font-inter selection:bg-amber-900/50 selection:text-amber-100">
       <div className="relative h-full w-full flex-1 bg-[#050505] shadow-[inset_0_0_100px_rgba(0,0,0,0.8)]">
         <DndInterface playerId={playerId} walletAddress={walletAddress || ''} />
       </div>
