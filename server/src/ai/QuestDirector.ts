@@ -10,6 +10,7 @@ export interface QuestActionInput {
     currentZoneThreatLevel: number;
     enemyCount?: number;
     initialEnemyCount?: number;
+    forcedDmRoll?: number;
 }
 
 export interface QuestActionOutput {
@@ -22,6 +23,9 @@ export interface QuestActionOutput {
  * QuestDirector manages the Chronological narrative and applies Shadowdark/GDD rules.
  */
 export class QuestDirector {
+    private randomD20(): number {
+        return Math.floor(Math.random() * 20) + 1;
+    }
 
     // GDD 1.2 Dead-end Protection: If no progress 10 mins, spawn patrol.
     private checkDeadEnd(lastProgressTime: Date | null): boolean {
@@ -32,6 +36,8 @@ export class QuestDirector {
     }
 
     public async processAction(input: QuestActionInput): Promise<QuestActionOutput | null> {
+        const dmRollForTurn = input.forcedDmRoll ?? this.randomD20();
+
         // 1. Check Dead-end protection
         const lastProgress = await getLastSuccessfulProgression(input.questId);
         if (this.checkDeadEnd(lastProgress)) {
@@ -48,7 +54,7 @@ export class QuestDirector {
         if (input.enemyCount !== undefined && input.initialEnemyCount !== undefined) {
             if (input.enemyCount <= input.initialEnemyCount / 2) {
                 // Simulate DM roll for Morale (DC 15 WIS check for enemies)
-                const dmRoll = Math.floor(Math.random() * 20) + 1;
+                const dmRoll = dmRollForTurn;
                 if (dmRoll < 15) {
                     const event: QuestActionOutput = {
                         narrative: "The enemies look around, realizing they are outnumbered. They drop their weapons and attempt to flee in terror!",
@@ -91,7 +97,7 @@ export class QuestDirector {
 
         if (aiOutput) {
             // Log History
-            await this.logHistory(input, aiOutput, Math.floor(Math.random() * 20) + 1);
+            await this.logHistory(input, aiOutput, dmRollForTurn);
         }
 
         return aiOutput;

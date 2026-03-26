@@ -7,6 +7,8 @@ import InteractionPanel from './dnd-interface/InteractionPanel';
 import DraggableItem from './dnd-interface/DraggableItem';
 import { useGameState } from '@/store/useGameState';
 import ZkDiceOverlay from './dnd-interface/ZkDiceOverlay';
+import { consumeAdventureDiceRoll } from '@/lib/OneChain';
+import { SERVER_URL } from '@/lib/config';
 
 interface DndInterfaceProps {
     playerId: string;
@@ -14,7 +16,7 @@ interface DndInterfaceProps {
 }
 
 export default function DndInterface({ playerId, walletAddress }: DndInterfaceProps) {
-    const { inventory, addToInventory, removeFromInventory, addMessage } = useGameState();
+    const { inventory, addToInventory, removeFromInventory, addMessage, testQuestSessionId } = useGameState();
     const [activeDragId, setActiveDragId] = useState<string | null>(null);
     const [activeDragSource, setActiveDragSource] = useState<'chat' | 'inventory' | null>(null);
 
@@ -23,6 +25,16 @@ export default function DndInterface({ playerId, walletAddress }: DndInterfacePr
     const [diceType, setDiceType] = useState<DiceType>('d20');
     const [diceResult, setDiceResult] = useState<number | null>(null);
     const [zkReceipt, setZkReceipt] = useState<string | null>(null);
+
+    const getSides = (type: DiceType) => {
+        if (type === 'd4') return 4;
+        if (type === 'd6') return 6;
+        if (type === 'd8') return 8;
+        if (type === 'd10') return 10;
+        if (type === 'd12') return 12;
+        if (type === 'd20') return 20;
+        return 20;
+    };
 
     const triggerRoll = (type: DiceType) => {
         if (isRolling) return;
@@ -38,25 +50,39 @@ export default function DndInterface({ playerId, walletAddress }: DndInterfacePr
                     // We just await the heavy API call here
 
                     const testSeed = `Quest-${Date.now()}-Loot`;
+                    let resolvedScore: number;
 
-                    const response = await fetch('http://localhost:3001/api/zk/prove-roll', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ seed: testSeed, bound: 100 })
-                    });
+                    if (testQuestSessionId) {
+                        const roll = await consumeAdventureDiceRoll(testQuestSessionId, 100, walletAddress);
+                        if (!roll.success || !roll.roll) {
+                            throw new Error(roll.error || 'Failed to consume dicepack roll.');
+                        }
 
-                    if (!response.ok) throw new Error("Failed to generate ZK Proof");
-                    const data = await response.json();
+                        resolvedScore = roll.roll;
+                        setDiceResult(roll.roll);
+                        setZkReceipt(roll.relayerTxHash || null);
+                    } else {
+                        const response = await fetch(`${SERVER_URL}/api/zk/prove-roll`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ seed: testSeed, bound: 100 })
+                        });
 
-                    const result = data.result.result;
-                    setDiceResult(result);
-                    setZkReceipt(data.receipt_base64);
+                        if (!response.ok) throw new Error("Failed to generate ZK Proof");
+                        const data = await response.json();
+                        const result = data.result.result;
+                        resolvedScore = result;
+                        setDiceResult(result);
+                        setZkReceipt(data.receipt_base64);
+                    }
 
                     addMessage({
                         sender: 'System',
                         senderType: 'system',
-                        content: `[ZK RECEIPT VERIFIED] Generated loot score: ${result}\nReceipt: ${data.receipt_base64.substring(0, 32)}...`,
-                        flavorText: 'Verifying off-chain results...'
+                        content: `[${testQuestSessionId ? 'DICEPACK' : 'ZK RECEIPT'} VERIFIED] Generated loot score: ${resolvedScore}`,
+                        flavorText: testQuestSessionId
+                            ? 'Relayer consumed a hidden pre-generated roll.'
+                            : 'Verifying off-chain proof payload.'
                     });
 
                     // Transition quest to completed
@@ -82,18 +108,43 @@ export default function DndInterface({ playerId, walletAddress }: DndInterfacePr
             return;
         }
 
+        const consumeRoll = async () => {
+            try {
+                const max = getSides(type);
+                if (testQuestSessionId) {
+                    const roll = await consumeAdventureDiceRoll(testQuestSessionId, max, walletAddress);
+                    if (!roll.success || !roll.roll) {
+                        throw new Error(roll.error || 'Failed to consume a pre-generated roll.');
+                    }
+
+                    setDiceResult(roll.roll);
+                    addMessage({
+                        sender: 'System',
+                        senderType: 'system',
+                        content: `[RELAYER] ${type.toUpperCase()} => ${roll.roll} (${roll.remainingRolls ?? 0} rolls left)`,
+                    });
+                } else {
+                    const result = Math.floor(Math.random() * max) + 1;
+                    setDiceResult(result);
+                    addMessage({
+                        sender: 'Player',
+                        senderType: 'player',
+                        content: `Rolled ${type}: ${result}`,
+                    });
+                }
+            } catch (error: any) {
+                addMessage({
+                    sender: 'System',
+                    senderType: 'system',
+                    content: `Dice error: ${error?.message || 'Roll failed.'}`,
+                });
+            } finally {
+                setTimeout(() => setIsRolling(false), 3000);
+            }
+        };
+
         setTimeout(() => {
-            const max = parseInt(type.substring(1)) || 20;
-            const result = Math.floor(Math.random() * max) + 1;
-            setDiceResult(result);
-
-            addMessage({
-                sender: 'Player',
-                senderType: 'player',
-                content: `Rolled ${type}: ${result}`,
-            });
-
-            setTimeout(() => setIsRolling(false), 3000);
+            void consumeRoll();
         }, 500);
     };
 

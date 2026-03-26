@@ -42,6 +42,7 @@
 9. [Chronicle, Governance, Privacy, and OneChain-Native Systems](#9-chronicle-governance-privacy-and-onechain-native-systems)
 10. [Technical Architecture, Security, UI, QA, and Production Plan](#10-technical-architecture-security-ui-qa-and-production-plan)
 11. [Appendices](#11-appendices)
+12. [OneChain Integration Execution Plan (March 2026)](#12-onechain-integration-execution-plan-march-2026)
 
 ---
 
@@ -657,3 +658,108 @@ The final implementation target is a game where a player can honestly say:
 > I entered a living dungeon with my friends, the world reacted to us, we found something that mattered, and when it was truly worthy, the world remembered it beyond the run.
 
 Every technical and design decision in this document exists to make that sentence true.
+
+---
+
+## 12. OneChain Integration Execution Plan (March 2026)
+
+This section defines the concrete first integration milestone for the current codebase.
+
+### 12.1 Asset Model (Authoritative Decision)
+
+| Asset | Standard | Transferability | Purpose |
+| --- | --- | --- | --- |
+| Hero Identity | `SBT (Soulbound)` | Non-transferable | Stores canonical hero identity and progression anchor |
+| Inventory Item | `NFT` | Transferable | Trade, sale, and lending market asset |
+| Chronicle Badge | `SBT` | Non-transferable | Historical achievement and governance weight |
+
+### 12.2 Hero SBT Data Schema
+
+| Field | Type | Source |
+| --- | --- | --- |
+| `owner` | address | Connected wallet |
+| `hero_name` | string | Character creation |
+| `hero_class` | string | Character creation |
+| `ancestry` | string | Character creation |
+| `alignment` | string | Shadowdark alignment choice |
+| `deity` | string | Shadowdark deity choice (required for priest) |
+| `title` | string | Derived from class + alignment + level |
+| `background` | string | Background roll/selection from Quickstart |
+| `level` | uint64 | Starts at 1 |
+| `xp` | uint64 | Starts at 0 |
+| `stat_str` | uint8 | 3-18 |
+| `stat_dex` | uint8 | 3-18 |
+| `stat_con` | uint8 | 3-18 |
+| `stat_int` | uint8 | 3-18 |
+| `stat_wis` | uint8 | 3-18 |
+| `stat_cha` | uint8 | 3-18 |
+| `hp_max` | uint64 | Class HD + CON mod (and ancestry modifiers) |
+| `armor_class` | uint64 | Base 10 + DEX mod (plus armor later) |
+| `starting_gold_gp` | uint64 | Character creation roll `2d6*5` |
+| `gear_slots` | uint64 | `max(10, STR)` (+ fighter bonus where applicable) |
+| `languages_csv` | string | Ancestry + class language grants |
+| `talents_csv` | string | Ancestry feature + class talent outcomes |
+| `known_spells_csv` | string | Priest/Wizard known spells at mint time |
+| `origin_lore_cid` | string | Filebase/IPFS JSON metadata |
+| `portrait_cid` | string | Filebase/IPFS image |
+| `hero_sheet_cid` | string | Filebase/IPFS canonical hero-sheet snapshot |
+| `ruleset_id` | string | Rules version (e.g. `Shadowdark-Quickstart-v1`) |
+| `created_at_ms` | uint64 | Mint block time |
+
+**Mint rule:** Hero creation is considered complete only if SBT mint succeeds. Mint must charge mint fee + gas from the connected wallet.
+
+### 12.3 Inventory NFT + Marketplace + Rent Model
+
+| Flow | On-chain outcome |
+| --- | --- |
+| Drop generated | Off-chain provisional item + metadata preparation |
+| Player confirms mint | Transferable inventory NFT minted to player wallet |
+| Sell | Listing object created, item escrowed |
+| Buy | Payment settlement + NFT ownership transfer |
+| Rent out | Time-bound rental listing with collateral/deposit |
+| Rent now | Temporary usage right granted until expiry |
+
+### 12.4 Payment Policy (Current Milestone)
+
+| Trigger | What user pays |
+| --- | --- |
+| Hero creation | SBT mint fee + gas |
+| Adventure start | Entry fee + AI generation budget + NFT mint reserve + gas buffer |
+| NFT mint from loot | Per-item mint fee + gas |
+
+The implementation in this milestone uses explicit prepay quotes in UI and transaction-intent calls, so replacing simulated calls with real PTB calls is straightforward.
+
+### 12.5 Filebase / IPFS Policy
+
+| Data type | Storage strategy |
+| --- | --- |
+| Lore metadata JSON | Filebase S3 upload, pinned, CID stored in metadata |
+| Generated images | Filebase S3 upload, pinned, CID referenced from JSON |
+| On-chain metadata pointer | URI/CID saved in token metadata field |
+
+### 12.6 Fair Dice (Anti-Cheat) Design
+
+Recommended phased model:
+
+1. **Phase A (now): Commit-Reveal**
+   - Client commits hash of `(seed + nonce + sessionId)` before action.
+   - Server commits independent seed hash for same roll window.
+   - Roll result is derived from both revealed values.
+2. **Phase B (next): Verifiable randomness source**
+   - Integrate VRF-compatible provider or validator-signed randomness proof.
+3. **Phase C (high-stakes outcomes): ZK attestation**
+   - Publish compact proof hash for key outcomes (boss loot, season finals).
+
+This prevents unilateral manipulation by either client or backend.
+
+### 12.7 Engineering Backlog (Immediate)
+
+| Priority | Task | Status |
+| --- | --- | --- |
+| P0 | Hero SBT mint transaction flow in character creation | In progress |
+| P0 | Adventure prepay quote + transaction intent before quest start | In progress |
+| P0 | Filebase metadata upload service for JSON + image | In progress |
+| P1 | Move contract extension for SBT + NFT market + rental primitives | Planned |
+| P1 | Indexer pipeline for market/ownership history | Planned |
+| P1 | Commit-reveal dice protocol implementation | Planned |
+| P2 | VRF/ZK expansion for tournament-grade fairness | Planned |

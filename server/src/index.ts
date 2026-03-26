@@ -23,6 +23,7 @@ import { CombatEngine } from './combat/CombatEngine';
 import { getCombat } from './db/combatQueries';
 import { ScenarioGenerator } from './ai/ScenarioGenerator';
 import { getRecentChronicles, insertChronicle } from './db/scenarioQueries';
+import { dicepackService } from './services/dicepack';
 
 const questDirector = new QuestDirector();
 const combatEngine = new CombatEngine();
@@ -33,6 +34,7 @@ dotenv.config({ path: '../.env' });
 
 const app = express();
 const port = process.env.PORT || 3001;
+const dicepackRelayerKey = process.env.DICEPACK_RELAYER_KEY || '';
 
 app.use(cors());
 app.use(express.json());
@@ -512,7 +514,22 @@ app.post('/api/quest/start', async (req, res) => {
 
 app.post('/api/quest/action', async (req, res) => {
     try {
-        const input: QuestActionInput = req.body;
+        const payload = req.body as QuestActionInput & { adventureSessionId?: number; aiRollSides?: number };
+        let forcedDmRoll: number | undefined;
+
+        if (payload.adventureSessionId !== undefined) {
+            const aiRoll = dicepackService.consumeRoll(
+                Number(payload.adventureSessionId),
+                'ai',
+                Number(payload.aiRollSides ?? 20),
+            );
+            forcedDmRoll = aiRoll.roll;
+        }
+
+        const input: QuestActionInput = {
+            ...payload,
+            forcedDmRoll,
+        };
         if (!input.questId || !input.playerAction || input.playerRoll === undefined || input.currentZoneThreatLevel === undefined) {
             return res.status(400).json({ error: 'Missing required quest action fields' });
         }
@@ -720,6 +737,70 @@ app.post('/api/adventure/init', async (req, res) => {
         });
     } catch (error: any) {
         res.status(500).json({ error: 'Failed to initialize adventure', details: error.message });
+    }
+});
+
+app.post('/api/adventure/session/start', async (req, res) => {
+    try {
+        const {
+            playerAddress,
+            playerRollsCount,
+            aiRollsCount,
+        } = req.body;
+
+        if (!playerAddress) {
+            return res.status(400).json({ error: 'Missing required field: playerAddress' });
+        }
+
+        const result = dicepackService.startSession({
+            playerAddress,
+            playerRollsCount,
+            aiRollsCount,
+        });
+
+        res.json({ success: true, session: result });
+    } catch (error: any) {
+        res.status(500).json({ error: 'Failed to start adventure dice session', details: error.message });
+    }
+});
+
+app.post('/api/adventure/session/:sessionId/roll/player', async (req, res) => {
+    try {
+        const sessionId = Number(req.params.sessionId);
+        const sides = Number(req.body?.sides ?? 20);
+        const playerAddress = String(req.body?.playerAddress || '');
+        const roll = dicepackService.consumeRoll(sessionId, 'player', sides, playerAddress);
+        res.json({ success: true, roll });
+    } catch (error: any) {
+        res.status(400).json({ error: 'Failed to consume player roll', details: error.message });
+    }
+});
+
+app.post('/api/adventure/session/:sessionId/roll/ai', async (req, res) => {
+    try {
+        if (dicepackRelayerKey) {
+            const providedKey = req.header('x-relayer-key');
+            if (providedKey !== dicepackRelayerKey) {
+                return res.status(403).json({ error: 'Forbidden: invalid relayer key' });
+            }
+        }
+
+        const sessionId = Number(req.params.sessionId);
+        const sides = Number(req.body?.sides ?? 20);
+        const roll = dicepackService.consumeRoll(sessionId, 'ai', sides);
+        res.json({ success: true, roll });
+    } catch (error: any) {
+        res.status(400).json({ error: 'Failed to consume AI roll', details: error.message });
+    }
+});
+
+app.post('/api/adventure/session/:sessionId/finalize', async (req, res) => {
+    try {
+        const sessionId = Number(req.params.sessionId);
+        const summary = dicepackService.finalizeSession(sessionId);
+        res.json({ success: true, summary });
+    } catch (error: any) {
+        res.status(400).json({ error: 'Failed to finalize adventure session', details: error.message });
     }
 });
 

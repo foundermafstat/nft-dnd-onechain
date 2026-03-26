@@ -6,6 +6,18 @@ import { ChevronDown, ChevronLeft, Minus, Plus, Save, Sparkles } from 'lucide-re
 import { HeroClass, Ancestry, ANCESTRIES, calculateModifier } from 'shared';
 import { useAuth } from '@/context/AuthContext';
 import { SERVER_URL } from '@/lib/config';
+import { mintHeroSBT } from '@/lib/OneChain';
+import { quoteHeroMintCost } from '@/lib/onechainEconomy';
+import {
+  type Alignment,
+  COMMON_LANGUAGES,
+  RARE_LANGUAGES,
+  DEITIES_BY_ALIGNMENT,
+  buildHeroSbtSnapshot,
+  defaultDeityForAlignment,
+  levelOneTitle,
+  rollStartingGoldGp,
+} from '@/lib/shadowdarkSbt';
 
 const panelClass =
   'rounded-[24px] border border-white/10 bg-[linear-gradient(180deg,rgba(20,20,24,0.9),rgba(11,11,14,0.95))] shadow-[0_18px_36px_rgba(0,0,0,0.42)] backdrop-blur';
@@ -73,15 +85,25 @@ function StatRow({
 
 export default function CreateHeroPage() {
   const router = useRouter();
-  const { playerId, isLoading } = useAuth();
+  const { playerId, walletAddress, isLoading } = useAuth();
 
   const [name, setName] = useState('');
   const [selectedAncestry, setSelectedAncestry] = useState<Ancestry>(Ancestry.Human);
   const [selectedClass, setSelectedClass] = useState<HeroClass>(HeroClass.Fighter);
-  const [alignment, setAlignment] = useState('Neutral');
+  const [alignment, setAlignment] = useState<Alignment>('Neutral');
+  const [deity, setDeity] = useState<string>(defaultDeityForAlignment('Neutral'));
   const [background, setBackground] = useState('');
   const [stats, setStats] = useState({ str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 });
   const [isSaving, setIsSaving] = useState(false);
+  const [startingGoldGp] = useState(() => rollStartingGoldGp());
+  const [humanExtraLanguage, setHumanExtraLanguage] = useState<string>('Dwarvish');
+  const [priestLanguage, setPriestLanguage] = useState<string>('Celestial');
+  const [wizardCommonLanguageA, setWizardCommonLanguageA] = useState<string>('Dwarvish');
+  const [wizardCommonLanguageB, setWizardCommonLanguageB] = useState<string>('Elvish');
+  const [wizardRareLanguageA, setWizardRareLanguageA] = useState<string>('Draconic');
+  const [wizardRareLanguageB, setWizardRareLanguageB] = useState<string>('Primordial');
+  const [knownSpellsInput, setKnownSpellsInput] = useState('');
+  const [extraTalentsInput, setExtraTalentsInput] = useState('');
 
   const [aiPrompt, setAiPrompt] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
@@ -155,8 +177,17 @@ export default function CreateHeroPage() {
     }
   }, [isLoading, playerId, router]);
 
+  useEffect(() => {
+    const allowed = DEITIES_BY_ALIGNMENT[alignment];
+    if (!allowed.includes(deity)) {
+      setDeity(defaultDeityForAlignment(alignment));
+    }
+  }, [alignment, deity]);
+
   const currentPoints = Object.values(stats).reduce((a, b) => a + b, 0);
   const availablePoints = TOTAL_POINTS - currentPoints;
+  const heroMintQuote = quoteHeroMintCost();
+  const titleAtLevelOne = levelOneTitle(selectedClass, alignment);
 
   const handleStatChange = (stat: keyof typeof stats, value: number) => {
     setStats((prev) => ({ ...prev, [stat]: value }));
@@ -188,7 +219,9 @@ export default function CreateHeroPage() {
         if (Object.values(HeroClass).includes(character.class)) {
           setSelectedClass(character.class as HeroClass);
         }
-        if (character.alignment) setAlignment(character.alignment);
+        if (['Lawful', 'Neutral', 'Chaotic'].includes(character.alignment)) {
+          setAlignment(character.alignment as Alignment);
+        }
         if (character.background) setBackground(character.background);
         if (character.stats) {
           setStats({
@@ -218,8 +251,11 @@ export default function CreateHeroPage() {
       alert('You must allocate all attribute points.');
       return;
     }
+    if (!walletAddress) {
+      alert('Connect wallet before forging your hero soulbound token.');
+      return;
+    }
 
-    setIsSaving(true);
     let baseHp = 4;
     if (selectedClass === HeroClass.Fighter) baseHp = 8;
     if (selectedClass === HeroClass.Priest) baseHp = 6;
@@ -229,8 +265,54 @@ export default function CreateHeroPage() {
     if (selectedAncestry === Ancestry.Dwarf) maxHp += 2;
 
     const ac = 10 + calculateModifier(stats.dex);
+    const alignmentDeities = DEITIES_BY_ALIGNMENT[alignment];
+    if (selectedClass === HeroClass.Priest && !alignmentDeities.includes(deity)) {
+      alert('Priest deity must match current alignment.');
+      return;
+    }
+
+    setIsSaving(true);
+
+    const knownSpells = knownSpellsInput
+      .split(',')
+      .map((value) => value.trim())
+      .filter(Boolean);
+    const extraTalents = extraTalentsInput
+      .split(',')
+      .map((value) => value.trim())
+      .filter(Boolean);
+
+    const sbtSnapshot = buildHeroSbtSnapshot({
+      heroClass: selectedClass,
+      ancestry: selectedAncestry,
+      alignment,
+      deity,
+      background,
+      stats,
+      maxHp,
+      armorClass: ac,
+      startingGoldGp,
+      humanExtraLanguage,
+      priestLanguage,
+      wizardCommonLanguages: [wizardCommonLanguageA, wizardCommonLanguageB],
+      wizardRareLanguages: [wizardRareLanguageA, wizardRareLanguageB],
+      knownSpells,
+      extraTalents,
+    });
 
     try {
+      const mintResult = await mintHeroSBT({
+        playerAddress: walletAddress,
+        heroName: name,
+        heroClass: selectedClass,
+        ancestry: selectedAncestry,
+        sbtSnapshot,
+      });
+
+      if (!mintResult.success) {
+        throw new Error(mintResult.error || 'Hero SBT mint transaction was rejected.');
+      }
+
       const response = await fetch(`${SERVER_URL}/api/character/create`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -245,6 +327,14 @@ export default function CreateHeroPage() {
           hp_current: maxHp,
           hp_max: maxHp,
           ac,
+          state: {
+            onchain: {
+              heroSbtMintHash: mintResult.hash,
+              heroMintPaidOne: mintResult.paidOne,
+              heroMintGasOne: mintResult.gasFeeOne,
+              heroSbtSnapshot: sbtSnapshot,
+            },
+          },
         }),
       });
 
@@ -330,7 +420,7 @@ export default function CreateHeroPage() {
                   <div className="relative">
                     <select
                       value={alignment}
-                      onChange={(e) => setAlignment(e.target.value)}
+                      onChange={(e) => setAlignment(e.target.value as Alignment)}
                       className={`${inputClass} appearance-none pr-10`}
                     >
                       <option value="Lawful">Lawful</option>
@@ -340,7 +430,151 @@ export default function CreateHeroPage() {
                     <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-500" />
                   </div>
                 </div>
+                <div>
+                  <label className="mb-2 block text-[0.65rem] uppercase tracking-[0.22em] text-stone-400">
+                    Deity
+                  </label>
+                  <div className="relative">
+                    <select
+                      value={deity}
+                      onChange={(e) => setDeity(e.target.value)}
+                      className={`${inputClass} appearance-none pr-10`}
+                    >
+                      {DEITIES_BY_ALIGNMENT[alignment].map((value) => (
+                        <option key={value} value={value}>
+                          {value}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-500" />
+                  </div>
+                </div>
               </div>
+
+              {selectedAncestry === Ancestry.Human && (
+                <div>
+                  <label className="mb-2 block text-[0.65rem] uppercase tracking-[0.22em] text-stone-400">
+                    Human Bonus Language
+                  </label>
+                  <div className="relative">
+                    <select
+                      value={humanExtraLanguage}
+                      onChange={(e) => setHumanExtraLanguage(e.target.value)}
+                      className={`${inputClass} appearance-none pr-10`}
+                    >
+                      {COMMON_LANGUAGES.filter((language) => language !== 'Common').map((language) => (
+                        <option key={language} value={language}>
+                          {language}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-500" />
+                  </div>
+                </div>
+              )}
+
+              {selectedClass === HeroClass.Priest && (
+                <div>
+                  <label className="mb-2 block text-[0.65rem] uppercase tracking-[0.22em] text-stone-400">
+                    Priest Sacred Language
+                  </label>
+                  <div className="relative">
+                    <select
+                      value={priestLanguage}
+                      onChange={(e) => setPriestLanguage(e.target.value)}
+                      className={`${inputClass} appearance-none pr-10`}
+                    >
+                      {RARE_LANGUAGES.map((language) => (
+                        <option key={language} value={language}>
+                          {language}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-500" />
+                  </div>
+                </div>
+              )}
+
+              {selectedClass === HeroClass.Wizard && (
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div>
+                    <label className="mb-2 block text-[0.65rem] uppercase tracking-[0.22em] text-stone-400">
+                      Wizard Common Language A
+                    </label>
+                    <div className="relative">
+                      <select
+                        value={wizardCommonLanguageA}
+                        onChange={(e) => setWizardCommonLanguageA(e.target.value)}
+                        className={`${inputClass} appearance-none pr-10`}
+                      >
+                        {COMMON_LANGUAGES.filter((language) => language !== 'Common').map((language) => (
+                          <option key={language} value={language}>
+                            {language}
+                          </option>
+                        ))}
+                      </select>
+                      <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-500" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="mb-2 block text-[0.65rem] uppercase tracking-[0.22em] text-stone-400">
+                      Wizard Common Language B
+                    </label>
+                    <div className="relative">
+                      <select
+                        value={wizardCommonLanguageB}
+                        onChange={(e) => setWizardCommonLanguageB(e.target.value)}
+                        className={`${inputClass} appearance-none pr-10`}
+                      >
+                        {COMMON_LANGUAGES.filter((language) => language !== 'Common').map((language) => (
+                          <option key={language} value={language}>
+                            {language}
+                          </option>
+                        ))}
+                      </select>
+                      <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-500" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="mb-2 block text-[0.65rem] uppercase tracking-[0.22em] text-stone-400">
+                      Wizard Rare Language A
+                    </label>
+                    <div className="relative">
+                      <select
+                        value={wizardRareLanguageA}
+                        onChange={(e) => setWizardRareLanguageA(e.target.value)}
+                        className={`${inputClass} appearance-none pr-10`}
+                      >
+                        {RARE_LANGUAGES.map((language) => (
+                          <option key={language} value={language}>
+                            {language}
+                          </option>
+                        ))}
+                      </select>
+                      <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-500" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="mb-2 block text-[0.65rem] uppercase tracking-[0.22em] text-stone-400">
+                      Wizard Rare Language B
+                    </label>
+                    <div className="relative">
+                      <select
+                        value={wizardRareLanguageB}
+                        onChange={(e) => setWizardRareLanguageB(e.target.value)}
+                        className={`${inputClass} appearance-none pr-10`}
+                      >
+                        {RARE_LANGUAGES.map((language) => (
+                          <option key={language} value={language}>
+                            {language}
+                          </option>
+                        ))}
+                      </select>
+                      <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-500" />
+                    </div>
+                  </div>
+                </div>
+              )}
 
               <div>
                 <label className="mb-2 block text-[0.65rem] uppercase tracking-[0.22em] text-stone-400">
@@ -351,6 +585,38 @@ export default function CreateHeroPage() {
                   onChange={(e) => setBackground(e.target.value)}
                   placeholder="Short origin story and defining motivation..."
                   className={`${inputClass} custom-scrollbar h-24 resize-none`}
+                />
+              </div>
+
+              {(selectedClass === HeroClass.Priest || selectedClass === HeroClass.Wizard) && (
+                <div>
+                  <label className="mb-2 block text-[0.65rem] uppercase tracking-[0.22em] text-stone-400">
+                    Known Spells (comma separated)
+                  </label>
+                  <input
+                    type="text"
+                    value={knownSpellsInput}
+                    onChange={(e) => setKnownSpellsInput(e.target.value)}
+                    placeholder={
+                      selectedClass === HeroClass.Priest
+                        ? 'Cure Wounds, Holy Weapon'
+                        : 'Magic Missile, Sleep, Shield'
+                    }
+                    className={inputClass}
+                  />
+                </div>
+              )}
+
+              <div>
+                <label className="mb-2 block text-[0.65rem] uppercase tracking-[0.22em] text-stone-400">
+                  Extra Talents Notes (comma separated)
+                </label>
+                <input
+                  type="text"
+                  value={extraTalentsInput}
+                  onChange={(e) => setExtraTalentsInput(e.target.value)}
+                  placeholder="Shield Specialist, Beast Tongue"
+                  className={inputClass}
                 />
               </div>
             </section>
@@ -502,11 +768,17 @@ export default function CreateHeroPage() {
                 {name || 'Unnamed'}
               </h3>
               <p className="mt-2 text-[0.78rem] text-stone-400">
-                Level 1 · {alignment} · {selectedAncestry} {selectedClass}
+                Level 1 {titleAtLevelOne} · {alignment} · {selectedAncestry} {selectedClass}
+              </p>
+              <p className="mt-1 text-[0.72rem] text-stone-500">
+                Deity: {deity} · Starting gold: {startingGoldGp} gp
               </p>
               <p className="mt-5 text-[0.75rem] leading-6 text-stone-500">
                 Your AI-generated chronicle and in-game decisions will shape future NFT relics tied to this character.
               </p>
+              <div className="mt-4 rounded-xl border border-amber-300/25 bg-amber-300/[0.06] px-3 py-2 text-[0.68rem] uppercase tracking-[0.14em] text-amber-100/85">
+                Hero SBT mint: {heroMintQuote.totalOne} ONE (incl. gas buffer)
+              </div>
 
               <button
                 onClick={handleSave}
