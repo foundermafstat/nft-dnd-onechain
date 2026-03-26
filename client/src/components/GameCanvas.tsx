@@ -215,10 +215,14 @@ export default function GameCanvas({ playerId }: GameCanvasProps) {
     // ── Broadcast position ─────────────────────────────────────────────
     useEffect(() => {
         if (channelRef.current) {
-            channelRef.current.send({
-                type: 'broadcast',
-                event: 'player-pos',
-                payload: { id: myId.current, tileX: myPos.tileX, tileY: myPos.tileY, color: myColor.current },
+            channelRef.current.httpSend('player-pos', {
+                id: myId.current,
+                tileX: myPos.tileX,
+                tileY: myPos.tileY,
+                color: myColor.current
+            }).catch(err => {
+                // Gracefully log but don't crash
+                console.warn('Broadcasting player pos failed:', err);
             });
         }
     }, [myPos]);

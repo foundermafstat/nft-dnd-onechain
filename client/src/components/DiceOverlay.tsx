@@ -184,7 +184,7 @@ function Dice({ type, isRolling, serverResult, onSettled }: DiceProps) {
             case 'd20': geo = new THREE.IcosahedronGeometry(R); break;
             default: geo = new THREE.BoxGeometry(R, R, R);
         }
-        const ni = geo.toNonIndexed();
+        const ni = geo.index ? geo.toNonIndexed() : geo;
         ni.computeVertexNormals();
         const pa = ni.getAttribute('position');
         const up = new THREE.Vector3(0, 1, 0);
@@ -376,7 +376,7 @@ export default function DiceOverlay({ rolling, diceType, result, onReset }: Over
             {/* 3D Canvas — renders ON TOP of the result text (z-2) */}
             <div className="absolute inset-0 w-full h-full pointer-events-none z-[2]">
                 <Canvas
-                    shadows
+                    shadows={{ type: THREE.PCFShadowMap }}
                     gl={{ antialias: true, alpha: true }}
                     style={{ pointerEvents: 'none' }}
                     orthographic

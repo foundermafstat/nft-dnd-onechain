@@ -2,9 +2,8 @@ import { useState, useRef, useEffect } from 'react';
 import { useGameState, ChatMessage } from '@/store/useGameState';
 import { useDroppable } from '@dnd-kit/core';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Backpack, Users, Send, User, Sparkles, Dices, ShieldAlert, CheckCircle2, X } from 'lucide-react';
+import { Backpack, Users, Send, User, Sparkles, Dices, ShieldAlert, CheckCircle2, X, Bot, WandSparkles } from 'lucide-react';
 import DraggableItem from './DraggableItem';
 import { DiceType } from '@/components/DiceOverlay';
 import { SERVER_URL } from '@/lib/config';
@@ -13,6 +12,22 @@ import { useAuth } from '@/context/AuthContext';
 
 interface InteractionPanelProps {
 	triggerRoll: (type: DiceType) => void;
+}
+
+function getMessageTone(senderType: ChatMessage['senderType']) {
+	if (senderType === 'player') {
+		return 'border-white/7 bg-[linear-gradient(180deg,rgba(27,27,30,0.96),rgba(18,18,20,0.96))] text-stone-100 rounded-br-lg';
+	}
+
+	if (senderType === 'dm') {
+		return 'border-amber-400/14 bg-[linear-gradient(180deg,rgba(64,48,24,0.30),rgba(20,18,15,0.96))] text-[#f2e7c7] rounded-bl-lg shadow-[0_16px_28px_rgba(0,0,0,0.28),inset_0_1px_0_rgba(255,255,255,0.04)]';
+	}
+
+	if (senderType === 'system') {
+		return 'border-transparent bg-transparent px-0 py-0 text-[0.73rem] italic text-stone-500 shadow-none';
+	}
+
+	return 'border-white/6 bg-[linear-gradient(180deg,rgba(18,21,24,0.96),rgba(12,14,16,0.96))] text-stone-200 rounded-bl-lg';
 }
 
 export default function InteractionPanel({ triggerRoll }: InteractionPanelProps) {
@@ -179,45 +194,67 @@ export default function InteractionPanel({ triggerRoll }: InteractionPanelProps)
 	};
 
 	return (
-		<div className="flex flex-col h-full w-full bg-[#050505] relative">
+		<div className="relative flex h-full w-full flex-col overflow-hidden">
+			<div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(214,169,90,0.08),transparent_22%),radial-gradient(circle_at_bottom,rgba(114,132,154,0.08),transparent_28%),linear-gradient(180deg,rgba(255,255,255,0.02),transparent_18%,transparent_82%,rgba(255,255,255,0.02))]" />
 
 			{/* 1. Chat History (Scrollable, takes up remaining space) */}
 			<div
 				ref={setChatDropRef}
-				className={`flex-1 overflow-hidden flex flex-col relative transition-colors duration-500 ${isChatOver ? 'bg-amber-900/10 ring-1 ring-inset ring-amber-500/40 shadow-[inset_0_0_50px_rgba(245,158,11,0.1)]' : ''}`}
+				className={`relative flex min-h-0 flex-1 flex-col overflow-hidden transition-colors duration-500 ${isChatOver ? 'bg-amber-900/10 ring-1 ring-inset ring-amber-500/40 shadow-[inset_0_0_60px_rgba(245,158,11,0.12)]' : ''}`}
 			>
-				<div className="px-5 py-3 text-[10px] uppercase tracking-[0.3em] font-cinzel text-amber-600/60 font-bold border-b border-amber-900/30 bg-[#0a0a0a] shrink-0 sticky top-0 z-10 shadow-sm flex items-center justify-between">
-					<span>Adventure Log</span>
-					{isChatOver && <span className="text-amber-400 animate-pulse">Drop to Use</span>}
+				<div className="sticky top-0 z-10 shrink-0 border-b border-white/6 bg-[linear-gradient(180deg,rgba(14,14,16,0.96),rgba(11,11,12,0.88))] px-5 py-4 shadow-[0_14px_28px_rgba(0,0,0,0.24)] backdrop-blur-2xl">
+					<div className="flex items-start justify-between gap-3">
+						<div className="flex items-start gap-3">
+							<div className="mt-0.5 flex h-10 w-10 items-center justify-center rounded-2xl border border-amber-400/14 bg-[linear-gradient(180deg,rgba(63,48,27,0.46),rgba(19,18,16,0.92))] text-amber-200 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
+								<Bot className="h-4 w-4" />
+							</div>
+							<div>
+								<div className="text-[0.6rem] font-inter font-semibold uppercase tracking-[0.32em] text-stone-500">
+									AI Dungeon Master
+								</div>
+								<h2 className="mt-1 font-cinzel text-[1.05rem] font-semibold tracking-[0.08em] text-stone-100">
+									Adventure Log
+								</h2>
+								<p className="mt-1 max-w-[26rem] text-[0.76rem] leading-relaxed text-stone-500">
+									Dialogue, system events and contextual AI responses appear here in a calmer command-console layout.
+								</p>
+							</div>
+						</div>
+
+						<div className="flex flex-col items-end gap-2">
+							<div className="rounded-full border border-white/7 bg-white/[0.03] px-3 py-1 text-[0.58rem] font-inter font-semibold uppercase tracking-[0.28em] text-stone-400">
+								{activeNpc ? `Linked: ${activeNpc.name}` : 'Open Channel'}
+							</div>
+							{isChatOver && (
+								<span className="rounded-full border border-amber-400/20 bg-amber-400/[0.08] px-3 py-1 text-[0.58rem] font-inter font-semibold uppercase tracking-[0.28em] text-amber-300 animate-pulse">
+									Drop to use
+								</span>
+							)}
+						</div>
+					</div>
 				</div>
 
-				<ScrollArea viewportRef={scrollRef} className="flex-1 min-h-0 bg-[#1c1c1c]">
-					<div className="space-y-6 pb-4 px-5 pt-6">
+				<ScrollArea viewportRef={scrollRef} className="flex-1 min-h-0 bg-[linear-gradient(180deg,rgba(21,21,23,0.88),rgba(13,13,15,0.95))]">
+					<div className="space-y-6 px-5 pb-6 pt-6">
 						{chatMessages.map(msg => (
 							<div key={msg.id} className={`flex flex-col ${msg.senderType === 'player' ? 'items-end' : 'items-start'} mb-2`}>
 
-								<div className={`flex items-baseline gap-2 mb-1.5 ${msg.senderType === 'player' ? 'flex-row-reverse' : ''}`}>
+								<div className={`mb-2 flex items-baseline gap-2 ${msg.senderType === 'player' ? 'flex-row-reverse' : ''}`}>
 									<button
 										onClick={() => handleNameClick(msg)}
-										className="text-[9px] font-cinzel text-stone-500 tracking-[0.2em] font-bold uppercase opacity-80 hover:text-amber-400 transition-colors cursor-pointer"
+										className="cursor-pointer text-[0.58rem] font-inter font-semibold uppercase tracking-[0.28em] text-stone-500 transition-colors hover:text-amber-300"
 									>
 										{msg.sender}
 									</button>
 
 									{msg.flavorText && (
-										<span className="text-[11px] font-inter text-stone-500 opacity-60 italic tracking-wide max-w-[65%] leading-tight text-left">
+										<span className="max-w-[65%] text-left text-[0.68rem] italic leading-tight tracking-wide text-stone-500/80">
 											{msg.flavorText}
 										</span>
 									)}
 								</div>
 
-								<div className={`
-                                    px-4 py-3 rounded-2xl text-[14px] font-inter max-w-[85%] break-words shadow-sm leading-relaxed
-                                    ${msg.senderType === 'player' ? 'bg-[#1a1714] text-amber-50 border border-stone-800 rounded-br-none' :
-										msg.senderType === 'dm' ? 'bg-gradient-to-br from-[#1a1005] to-[#0a0602] text-amber-200 border border-amber-900/40 rounded-bl-none font-serif text-[15px] shadow-[0_2px_15px_rgba(245,158,11,0.05)]' :
-											msg.senderType === 'system' ? 'bg-transparent text-stone-400 border border-transparent italic flex gap-2 items-center text-xs' :
-												'bg-[#0a0a0a] text-stone-300 border border-stone-800/50 rounded-bl-none'}
-                                `}>
+								<div className={`max-w-[88%] break-words rounded-[1.4rem] border px-4 py-3.5 text-[0.84rem] leading-[1.65] shadow-[0_12px_24px_rgba(0,0,0,0.18)] ${getMessageTone(msg.senderType)}`}>
 									<div>{msg.content}</div>
 
 									{/* Render Spawned Item in Chat (Draggable) */}
@@ -235,10 +272,10 @@ export default function InteractionPanel({ triggerRoll }: InteractionPanelProps)
 
 			{/* 2. Dynamic Menus (In-flow flex item to push chat up) */}
 			{activeMenu && (
-				<div className="shrink-0 h-[35vh] bg-[#0a0a0a]/95 backdrop-blur-xl border-t border-amber-900/30 shadow-[0_-10px_30px_rgba(0,0,0,0.5)] z-20 animate-in slide-in-from-bottom-5 duration-300 relative">
-					<div className="absolute top-0 inset-x-0 h-[1px] bg-gradient-to-r from-transparent via-amber-700/50 to-transparent"></div>
-					<div className="p-4 flex justify-between items-center border-b border-amber-900/20">
-						<h3 className="font-cinzel font-bold text-amber-400 tracking-[0.2em] uppercase text-sm">{activeMenu}</h3>
+				<div className="relative z-20 h-[35vh] shrink-0 animate-in slide-in-from-bottom-5 duration-300 border-t border-white/6 bg-[linear-gradient(180deg,rgba(13,13,15,0.96),rgba(9,10,11,0.96))] shadow-[0_-20px_40px_rgba(0,0,0,0.45)] backdrop-blur-2xl">
+					<div className="absolute top-0 inset-x-0 h-[1px] bg-gradient-to-r from-transparent via-amber-500/45 to-transparent"></div>
+					<div className="flex items-center justify-between border-b border-white/6 px-5 py-4">
+						<h3 className="font-cinzel text-[0.9rem] font-semibold uppercase tracking-[0.24em] text-stone-100">{activeMenu}</h3>
 						<button onClick={() => setActiveMenu(null)} className="text-stone-500 hover:text-amber-500 text-[10px] uppercase font-cinzel font-bold tracking-widest transition-colors flex flex-col items-center">
 							<span className="text-lg leading-none">×</span>
 						</button>
@@ -255,31 +292,31 @@ export default function InteractionPanel({ triggerRoll }: InteractionPanelProps)
 			)}
 
 			{/* 3. Control Panel (Fixed Bottom) */}
-			<div className="shrink-0 bg-[#111] border-t border-amber-900/30 p-4 space-y-4 z-30 shadow-[0_-5px_20px_rgba(0,0,0,0.5)] relative">
-				<div className="absolute top-0 inset-x-0 h-[1px] bg-gradient-to-r from-transparent via-amber-900/50 to-transparent"></div>
+			<div className="relative z-30 shrink-0 border-t border-white/6 bg-[linear-gradient(180deg,rgba(14,14,16,0.98),rgba(9,9,11,0.98))] px-5 pb-5 pt-4 shadow-[0_-10px_28px_rgba(0,0,0,0.42)]">
+				<div className="absolute top-0 inset-x-0 h-[1px] bg-gradient-to-r from-transparent via-amber-500/40 to-transparent"></div>
 
 				{/* Dice & Quick Actions */}
-				<div className="flex gap-3 items-center justify-between">
+				<div className="mb-4 flex items-center justify-between gap-3">
 					{/* Left Actions */}
-					<div className="flex gap-2.5">
+					<div className="flex gap-2 rounded-2xl border border-white/6 bg-white/[0.02] p-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
 						<Button
 							variant="outline"
 							size="sm"
-							className={`h-9 px-3 rounded-lg border transition-all duration-300 ${activeMenu === 'dice' ? 'bg-amber-900/20 text-amber-400 border-amber-500/50 shadow-[inset_0_0_10px_rgba(245,158,11,0.1)]' : 'bg-[#100c08] border-stone-800 text-stone-400 hover:bg-[#1a1714] hover:border-stone-600 hover:text-amber-100'}`}
+							className={`h-10 rounded-xl border px-4 transition-all duration-300 ${activeMenu === 'dice' ? 'border-amber-400/34 bg-amber-400/[0.09] text-amber-200 shadow-[inset_0_0_18px_rgba(245,158,11,0.1)]' : 'border-transparent bg-transparent text-stone-400 hover:bg-white/[0.04] hover:text-amber-100'}`}
 							onClick={() => setActiveMenu(activeMenu === 'dice' ? null : 'dice')}
 							title="Roll Dice"
 						>
 							<Dices className="h-4 w-4 mr-2" />
-							<span className="text-xs font-cinzel font-bold tracking-widest uppercase">Dice</span>
+							<span className="text-[0.68rem] font-inter font-semibold tracking-[0.22em] uppercase">Dice</span>
 						</Button>
 					</div>
 
 					{/* Right Actions */}
-					<div className="flex gap-2.5">
+					<div className="flex gap-2 rounded-2xl border border-white/6 bg-white/[0.02] p-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
 						<Button
 							variant="outline"
 							size="sm"
-							className={`h-9 px-3 rounded-lg border transition-all duration-300 ${activeMenu === 'playerInfo' ? 'bg-amber-900/20 text-amber-400 border-amber-500/50 shadow-[inset_0_0_10px_rgba(245,158,11,0.1)]' : 'bg-[#100c08] border-stone-800 text-stone-400 hover:bg-[#1a1714] hover:border-stone-600 hover:text-amber-100'}`}
+							className={`h-10 rounded-xl border px-3 transition-all duration-300 ${activeMenu === 'playerInfo' ? 'border-amber-400/34 bg-amber-400/[0.09] text-amber-200 shadow-[inset_0_0_18px_rgba(245,158,11,0.1)]' : 'border-transparent bg-transparent text-stone-400 hover:bg-white/[0.04] hover:text-amber-100'}`}
 							onClick={() => setActiveMenu(activeMenu === 'playerInfo' ? null : 'playerInfo')}
 							title="Player Info"
 						>
@@ -289,7 +326,7 @@ export default function InteractionPanel({ triggerRoll }: InteractionPanelProps)
 						<Button
 							variant="outline"
 							size="sm"
-							className={`h-9 px-3 rounded-lg border transition-all duration-300 ${activeMenu === 'skills' ? 'bg-amber-900/20 text-amber-400 border-amber-500/50 shadow-[inset_0_0_10px_rgba(245,158,11,0.1)]' : 'bg-[#100c08] border-stone-800 text-stone-400 hover:bg-[#1a1714] hover:border-stone-600 hover:text-amber-100'}`}
+							className={`h-10 rounded-xl border px-3 transition-all duration-300 ${activeMenu === 'skills' ? 'border-amber-400/34 bg-amber-400/[0.09] text-amber-200 shadow-[inset_0_0_18px_rgba(245,158,11,0.1)]' : 'border-transparent bg-transparent text-stone-400 hover:bg-white/[0.04] hover:text-amber-100'}`}
 							onClick={() => setActiveMenu(activeMenu === 'skills' ? null : 'skills')}
 							title="Skills & Abilities"
 						>
@@ -299,7 +336,7 @@ export default function InteractionPanel({ triggerRoll }: InteractionPanelProps)
 						<Button
 							variant="outline"
 							size="sm"
-							className={`h-9 px-3 rounded-lg border transition-all duration-300 ${activeMenu === 'party' ? 'bg-amber-900/20 text-amber-400 border-amber-500/50 shadow-[inset_0_0_10px_rgba(245,158,11,0.1)]' : 'bg-[#100c08] border-stone-800 text-stone-400 hover:bg-[#1a1714] hover:border-stone-600 hover:text-amber-100'}`}
+							className={`h-10 rounded-xl border px-3 transition-all duration-300 ${activeMenu === 'party' ? 'border-amber-400/34 bg-amber-400/[0.09] text-amber-200 shadow-[inset_0_0_18px_rgba(245,158,11,0.1)]' : 'border-transparent bg-transparent text-stone-400 hover:bg-white/[0.04] hover:text-amber-100'}`}
 							onClick={() => setActiveMenu(activeMenu === 'party' ? null : 'party')}
 							title="Party Status"
 						>
@@ -313,15 +350,15 @@ export default function InteractionPanel({ triggerRoll }: InteractionPanelProps)
 
 				{/* Action Grids - Only show if actions exist */}
 				{(testQuestState === 'combat' || testQuestState === 'completed') && (
-					<div className="flex gap-4 p-4 border-t border-amber-900/30 bg-[#0a0a0a]/50">
+					<div className="mb-4 flex gap-4 rounded-[24px] border border-white/6 bg-white/[0.02] p-4">
 						{/* ZK Quest Action (Conditional) */}
 						{testQuestState === 'combat' && (
 							<button
 								onClick={handleZkLootRoll}
-								className="flex-1 flex flex-col items-center gap-1.5 p-3 rounded-xl bg-gradient-to-r from-emerald-900/40 to-emerald-800/20 border border-emerald-500/30 hover:bg-emerald-800/40 transition-colors group"
+								className="group flex flex-1 flex-col items-center gap-1.5 rounded-2xl border border-emerald-400/20 bg-[linear-gradient(180deg,rgba(17,62,54,0.88),rgba(10,27,27,0.96))] p-3 transition-all hover:-translate-y-0.5 hover:border-emerald-300/42"
 							>
 								<ShieldAlert className="w-5 h-5 text-emerald-400 group-hover:scale-110 transition-transform" />
-								<span className="font-cinzel text-[10px] font-bold text-emerald-200 tracking-wider">Generate ZK Loot</span>
+								<span className="font-inter text-[0.66rem] font-semibold uppercase tracking-[0.22em] text-emerald-100">Generate ZK Loot</span>
 							</button>
 						)}
 
@@ -329,24 +366,35 @@ export default function InteractionPanel({ triggerRoll }: InteractionPanelProps)
 							<button
 								onClick={handleEndQuest}
 								disabled={isEndingQuest}
-								className="flex-1 flex flex-col items-center gap-1.5 p-3 rounded-xl bg-gradient-to-r from-amber-700 to-amber-600 border border-amber-500/30 hover:bg-amber-600 transition-colors group"
+								className="group flex flex-1 flex-col items-center gap-1.5 rounded-2xl border border-amber-400/24 bg-[linear-gradient(180deg,rgba(93,61,22,0.94),rgba(43,31,18,0.98))] p-3 transition-all hover:-translate-y-0.5 hover:border-amber-200/42"
 							>
 								{isEndingQuest ? (
 									<div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
 								) : (
 									<CheckCircle2 className="w-5 h-5 text-amber-200 group-hover:scale-110 transition-transform" />
 								)}
-								<span className="font-cinzel text-[10px] font-bold text-amber-50 tracking-wider">Finalize Quest (On-Chain)</span>
+								<span className="font-inter text-[0.66rem] font-semibold uppercase tracking-[0.2em] text-amber-50">Finalize Quest</span>
 							</button>
 						)}
 					</div>
 				)}
 
 				{/* Text Input */}
-				<div className="flex gap-3 items-center relative">
-					<div className={`flex-1 flex gap-2 items-center bg-[#050505] border ${activeNpc || isSendingDialog ? 'border-amber-500/50 ring-1 ring-amber-500/50' : 'border-stone-800 focus-within:ring-1 focus-within:ring-amber-500/50 focus-within:border-amber-500/50'} rounded-xl shadow-inner transition-all px-3 h-12`}>
+				<div className="rounded-[28px] border border-white/6 bg-[linear-gradient(180deg,rgba(15,15,17,0.98),rgba(10,10,11,0.98))] p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.04),0_18px_32px_rgba(0,0,0,0.3)]">
+					<div className="mb-3 flex items-center justify-between gap-3">
+						<div className="flex items-center gap-2 text-[0.58rem] font-inter font-semibold uppercase tracking-[0.28em] text-stone-500">
+							<WandSparkles className="h-3.5 w-3.5 text-amber-300/80" />
+							Response Channel
+						</div>
+						<div className="rounded-full border border-white/7 bg-white/[0.03] px-3 py-1 text-[0.58rem] font-inter font-semibold uppercase tracking-[0.28em] text-stone-400">
+							{currentTurn === 'player' ? 'Ready' : 'Locked'}
+						</div>
+					</div>
+
+					<div className="relative flex items-center gap-3">
+						<div className={`flex h-14 flex-1 items-center gap-2 rounded-[22px] border px-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] transition-all bg-[linear-gradient(180deg,rgba(10,10,11,0.98),rgba(16,16,18,0.96))] ${activeNpc || isSendingDialog ? 'border-amber-500/40 ring-1 ring-amber-500/25' : 'border-white/8 focus-within:border-amber-500/28 focus-within:ring-1 focus-within:ring-amber-500/24'}`}>
 						{activeNpc && (
-							<div className="flex items-center gap-2 bg-amber-900/30 text-amber-400 pl-2.5 pr-1 py-1 rounded-md border border-amber-700/50 shadow-[0_0_10px_rgba(245,158,11,0.1)] shrink-0 group/badge">
+							<div className="group/badge flex shrink-0 items-center gap-2 rounded-2xl border border-amber-400/18 bg-amber-400/[0.08] py-1.5 pl-3 pr-1.5 text-amber-200 shadow-[0_0_18px_rgba(245,158,11,0.08)]">
 								<span className="text-[10px] font-cinzel font-bold uppercase tracking-widest flex items-center gap-1.5">
 									<span className="text-amber-600">to:</span> {activeNpc.name}
 								</span>
@@ -360,7 +408,7 @@ export default function InteractionPanel({ triggerRoll }: InteractionPanelProps)
 							</div>
 						)}
 						<input
-							className="flex-1 bg-transparent border-none text-amber-50 placeholder:text-stone-600 font-inter outline-none h-full text-sm"
+							className="h-full flex-1 border-none bg-transparent text-[0.88rem] text-stone-100 placeholder:text-stone-500 font-inter outline-none"
 							placeholder={
 								isSendingDialog ? `${activeNpc?.name} is responding...` :
 									activeNpc ? `Type message...` :
@@ -371,23 +419,27 @@ export default function InteractionPanel({ triggerRoll }: InteractionPanelProps)
 							onKeyDown={handleKeyPress}
 							disabled={currentTurn !== 'player' || isSendingDialog}
 						/>
-					</div>
+						</div>
 
-					<Button
-						onClick={handleSend}
-						disabled={!inputText.trim() || currentTurn !== 'player' || isSendingDialog}
-						className="h-12 px-6 bg-gradient-to-r from-amber-700 to-amber-600 hover:from-amber-600 hover:to-amber-500 text-amber-50 rounded-xl disabled:opacity-50 border border-amber-500/30 font-cinzel tracking-widest uppercase font-bold text-xs shadow-[0_0_15px_rgba(245,158,11,0.2)] hover:shadow-[0_0_20px_rgba(245,158,11,0.4)] transition-all duration-300 group"
-					>
-						{isSendingDialog ? (
-							<span className="flex gap-1">
-								<span className="w-1.5 h-1.5 bg-amber-200 rounded-full animate-bounce"></span>
-								<span className="w-1.5 h-1.5 bg-amber-200 rounded-full animate-bounce delay-100"></span>
-								<span className="w-1.5 h-1.5 bg-amber-200 rounded-full animate-bounce delay-200"></span>
-							</span>
-						) : (
-							<Send className="w-4 h-4 group-hover:-translate-y-0.5 group-hover:translate-x-0.5 transition-transform" />
-						)}
-					</Button>
+						<Button
+							onClick={handleSend}
+							disabled={!inputText.trim() || currentTurn !== 'player' || isSendingDialog}
+							className="group h-14 rounded-[22px] border border-amber-400/20 bg-[linear-gradient(180deg,rgba(110,78,35,0.96),rgba(63,45,22,0.98))] px-5 text-[0.68rem] font-inter font-semibold uppercase tracking-[0.24em] text-amber-50 shadow-[0_14px_28px_rgba(64,41,15,0.34)] transition-all duration-300 hover:-translate-y-0.5 hover:border-amber-200/36 hover:shadow-[0_18px_34px_rgba(64,41,15,0.4)] disabled:opacity-50"
+						>
+							{isSendingDialog ? (
+								<span className="flex gap-1">
+									<span className="h-1.5 w-1.5 animate-bounce rounded-full bg-amber-100"></span>
+									<span className="delay-100 h-1.5 w-1.5 animate-bounce rounded-full bg-amber-100"></span>
+									<span className="delay-200 h-1.5 w-1.5 animate-bounce rounded-full bg-amber-100"></span>
+								</span>
+							) : (
+								<>
+									<span>Send</span>
+									<Send className="h-4 w-4 transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
+								</>
+							)}
+						</Button>
+					</div>
 				</div>
 			</div>
 		</div >
@@ -413,8 +465,8 @@ function InventoryButtonDropzone({ activeMenu, setActiveMenu }: { activeMenu: st
 			ref={setNodeRef}
 			variant="outline"
 			size="sm"
-			className={`h-9 px-3 rounded-lg border transition-all duration-300
-        ${activeMenu === 'inventory' ? 'bg-amber-900/20 text-amber-400 border-amber-500/50 shadow-[inset_0_0_10px_rgba(245,158,11,0.1)]' : 'bg-[#100c08] border-stone-800 text-stone-400 hover:bg-[#1a1714] hover:border-stone-600 hover:text-amber-100'}
+			className={`h-10 rounded-xl border px-3 transition-all duration-300
+        ${activeMenu === 'inventory' ? 'border-amber-400/34 bg-amber-400/[0.09] text-amber-200 shadow-[inset_0_0_18px_rgba(245,158,11,0.1)]' : 'border-transparent bg-transparent text-stone-400 hover:bg-white/[0.04] hover:text-amber-100'}
         ${isOver ? 'ring-2 ring-amber-500 shadow-[0_0_20px_rgba(245,158,11,0.6)] scale-105 bg-amber-900/30' : ''}
       `}
 			onClick={() => setActiveMenu(activeMenu === 'inventory' ? null : 'inventory')}
@@ -437,23 +489,23 @@ function InventoryMenu() {
 	return (
 		<div
 			ref={setNodeRef}
-			className={`p-6 min-h-full transition-colors duration-500 ${isOver ? 'bg-amber-900/10 shadow-[inset_0_0_100px_rgba(245,158,11,0.05)]' : ''}`}
+			className={`min-h-full p-6 transition-colors duration-500 ${isOver ? 'bg-amber-900/10 shadow-[inset_0_0_100px_rgba(245,158,11,0.05)]' : ''}`}
 		>
 			{inventory.length === 0 ? (
-				<div className="flex flex-col items-center justify-center h-40 text-center text-stone-600 font-cinzel tracking-widest uppercase italic py-8 border border-dashed border-stone-800 rounded-xl bg-[#050505]">
+				<div className="flex h-40 flex-col items-center justify-center rounded-[24px] border border-dashed border-white/8 bg-white/[0.02] py-8 text-center text-[0.72rem] uppercase tracking-[0.22em] text-stone-500">
 					<Backpack className="w-8 h-8 mb-3 opacity-20" />
 					Your pack is empty.<br />Drag loot here to collect it.
 				</div>
 			) : (
 				<div className="grid grid-cols-4 gap-4">
 					{inventory.map(item => (
-						<div key={item.id} className="aspect-square bg-[#050505] border border-stone-800 rounded-xl flex flex-col items-center justify-center p-3 relative group hover:border-amber-500/40 hover:bg-[#0a0a0a] transition-all shadow-inner hover:shadow-[0_0_15px_rgba(245,158,11,0.1)]">
+						<div key={item.id} className="group relative flex aspect-square flex-col items-center justify-center rounded-[22px] border border-white/7 bg-[linear-gradient(180deg,rgba(18,18,21,0.96),rgba(11,11,13,0.96))] p-3 transition-all hover:border-amber-400/28 hover:shadow-[0_0_15px_rgba(245,158,11,0.08)]">
 							<DraggableItem id={item.id} source="inventory">
-								<div className="w-12 h-12 rounded-lg bg-[#100c08] border border-stone-800 flex items-center justify-center mb-2 text-2xl text-amber-500 shadow-inner group-hover:scale-110 transition-transform duration-300">
+								<div className="mb-2 flex h-12 w-12 items-center justify-center rounded-2xl border border-white/8 bg-[linear-gradient(180deg,rgba(38,31,23,0.88),rgba(17,17,18,0.94))] text-2xl text-amber-300 transition-transform duration-300 group-hover:scale-110">
 									{/* Icon placeholder based on type */}
 									{item.type === 'weapon' ? '⚔️' : item.type === 'consumable' ? '🧪' : '🛡️'}
 								</div>
-								<span className="text-[10px] font-inter font-medium text-stone-400 text-center leading-tight truncate w-full px-1 group-hover:text-amber-200 transition-colors">{item.name}</span>
+								<span className="w-full truncate px-1 text-center text-[0.68rem] font-medium leading-tight text-stone-400 transition-colors group-hover:text-amber-100">{item.name}</span>
 							</DraggableItem>
 						</div>
 					))}
@@ -470,18 +522,18 @@ function PartyMenu() {
 	return (
 		<div className="p-6 space-y-4">
 			{party.length === 0 ? (
-				<div className="text-stone-500 text-center text-sm italic font-inter px-8 py-10 border border-dashed border-stone-800 rounded-xl bg-[#050505]">No party members found.</div>
+				<div className="rounded-[24px] border border-dashed border-white/8 bg-white/[0.02] px-8 py-10 text-center text-[0.82rem] italic text-stone-500">No party members found.</div>
 			) : (
 				party.map(member => (
-					<div key={member.id} className="p-4 bg-[#050505] border border-stone-800 rounded-xl shadow-inner relative overflow-hidden group hover:border-amber-900/40 transition-colors">
-						<div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-amber-900/20 to-transparent"></div>
+					<div key={member.id} className="group relative overflow-hidden rounded-[24px] border border-white/7 bg-[linear-gradient(180deg,rgba(18,18,21,0.96),rgba(11,11,13,0.96))] p-4 transition-colors hover:border-amber-400/20">
+						<div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-amber-400/20 to-transparent"></div>
 						<div className="flex justify-between items-center mb-3">
-							<span className="font-bold font-cinzel tracking-wider text-amber-50 group-hover:text-amber-200 transition-colors uppercase">{member.name}</span>
-							<span className={`text-xs font-inter font-bold tracking-widest ${member.isDead ? 'text-red-500' : 'text-emerald-400'}`}>
+							<span className="font-cinzel text-[0.88rem] font-semibold uppercase tracking-[0.12em] text-stone-100 transition-colors group-hover:text-amber-100">{member.name}</span>
+							<span className={`text-[0.68rem] font-inter font-semibold uppercase tracking-[0.18em] ${member.isDead ? 'text-red-500' : 'text-emerald-400'}`}>
 								{member.hp} / {member.maxHp} HP
 							</span>
 						</div>
-						<div className="w-full bg-[#100c08] rounded-full h-2 overflow-hidden border border-stone-800 shadow-[inset_0_1px_3px_rgba(0,0,0,0.8)]">
+						<div className="h-2 w-full overflow-hidden rounded-full border border-white/6 bg-[#121214] shadow-[inset_0_1px_3px_rgba(0,0,0,0.8)]">
 							<div
 								className={`h-full transition-all duration-700 ease-out relative ${member.isDead ? 'bg-red-900' : member.hp / member.maxHp > 0.3 ? 'bg-gradient-to-r from-emerald-600 to-emerald-400' : 'bg-gradient-to-r from-red-600 to-red-400'}`}
 								style={{ width: `${Math.max(0, Math.min(100, (member.hp / member.maxHp) * 100))}%` }}
@@ -501,43 +553,43 @@ function PlayerInfoMenu() {
 
 	return (
 		<div className="p-6 space-y-6">
-			<div className="flex items-start gap-4 p-4 bg-[#050505] border border-stone-800 rounded-xl shadow-inner relative overflow-hidden">
-				<div className="w-16 h-16 rounded-xl border border-amber-900/50 bg-[#100c08] flex items-center justify-center text-3xl shrink-0">
+			<div className="relative flex items-start gap-4 overflow-hidden rounded-[24px] border border-white/7 bg-[linear-gradient(180deg,rgba(18,18,21,0.96),rgba(11,11,13,0.96))] p-4">
+				<div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-[20px] border border-white/8 bg-[linear-gradient(180deg,rgba(39,31,22,0.9),rgba(17,17,18,0.95))] text-3xl">
 					<User className="w-8 h-8 text-amber-600/50" />
 				</div>
 				<div className="flex-1">
-					<h4 className="font-cinzel text-lg font-bold text-amber-400 uppercase tracking-widest drop-shadow-[0_0_5px_rgba(245,158,11,0.3)]">
+					<h4 className="font-cinzel text-[1rem] font-semibold uppercase tracking-[0.16em] text-amber-100">
 						{playerCharacter ? playerCharacter.name : 'Unknown Hero'}
 					</h4>
-					<p className="text-sm font-inter text-stone-400 capitalize">
+					<p className="text-[0.8rem] capitalize text-stone-400">
 						{playerCharacter ? `Level ${playerCharacter.level || 1} ${playerCharacter.ancestry || ''} ${playerCharacter.class || ''}` : 'Level 1 Wanderer'}
 					</p>
-					<div className="mt-3 grid grid-cols-3 gap-2 text-center text-xs font-inter font-bold tracking-widest text-stone-500">
-						<div className="bg-[#100c08] border border-stone-800 rounded p-2"><span className="block text-amber-200">STR</span> {playerCharacter?.str || '--'}</div>
-						<div className="bg-[#100c08] border border-stone-800 rounded p-2"><span className="block text-amber-200">DEX</span> {playerCharacter?.dex || '--'}</div>
-						<div className="bg-[#100c08] border border-stone-800 rounded p-2"><span className="block text-amber-200">CON</span> {playerCharacter?.con || '--'}</div>
-						<div className="bg-[#100c08] border border-stone-800 rounded p-2"><span className="block text-amber-200">INT</span> {playerCharacter?.int || '--'}</div>
-						<div className="bg-[#100c08] border border-stone-800 rounded p-2"><span className="block text-amber-200">WIS</span> {playerCharacter?.wis || '--'}</div>
-						<div className="bg-[#100c08] border border-stone-800 rounded p-2"><span className="block text-amber-200">CHA</span> {playerCharacter?.cha || '--'}</div>
+					<div className="mt-3 grid grid-cols-3 gap-2 text-center text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-stone-500">
+						<div className="rounded-xl border border-white/7 bg-white/[0.02] p-2"><span className="block text-amber-200">STR</span> {playerCharacter?.str || '--'}</div>
+						<div className="rounded-xl border border-white/7 bg-white/[0.02] p-2"><span className="block text-amber-200">DEX</span> {playerCharacter?.dex || '--'}</div>
+						<div className="rounded-xl border border-white/7 bg-white/[0.02] p-2"><span className="block text-amber-200">CON</span> {playerCharacter?.con || '--'}</div>
+						<div className="rounded-xl border border-white/7 bg-white/[0.02] p-2"><span className="block text-amber-200">INT</span> {playerCharacter?.int || '--'}</div>
+						<div className="rounded-xl border border-white/7 bg-white/[0.02] p-2"><span className="block text-amber-200">WIS</span> {playerCharacter?.wis || '--'}</div>
+						<div className="rounded-xl border border-white/7 bg-white/[0.02] p-2"><span className="block text-amber-200">CHA</span> {playerCharacter?.cha || '--'}</div>
 					</div>
 				</div>
 			</div>
 
 			<div className="grid grid-cols-2 gap-4">
-				<div className="p-3 bg-[#050505] border border-stone-800 rounded-xl flex flex-col items-center">
-					<span className="text-[10px] uppercase font-cinzel font-bold tracking-widest text-amber-700/80 mb-1 block">Max HP</span>
-					<span className="text-xl font-cinzel text-amber-100">{playerCharacter?.max_hp || 10}</span>
+				<div className="flex flex-col items-center rounded-[20px] border border-white/7 bg-white/[0.02] p-3">
+					<span className="mb-1 block text-[0.62rem] uppercase tracking-[0.24em] text-stone-500">Max HP</span>
+					<span className="font-cinzel text-[1.2rem] text-amber-100">{playerCharacter?.max_hp || 10}</span>
 				</div>
-				<div className="p-3 bg-[#050505] border border-stone-800 rounded-xl flex flex-col items-center">
-					<span className="text-[10px] uppercase font-cinzel font-bold tracking-widest text-amber-700/80 mb-1 block">Alignment</span>
-					<span className="text-xl font-cinzel text-amber-100">{playerCharacter?.alignment || 'Neutral'}</span>
+				<div className="flex flex-col items-center rounded-[20px] border border-white/7 bg-white/[0.02] p-3">
+					<span className="mb-1 block text-[0.62rem] uppercase tracking-[0.24em] text-stone-500">Alignment</span>
+					<span className="font-cinzel text-[1.2rem] text-amber-100">{playerCharacter?.alignment || 'Neutral'}</span>
 				</div>
 			</div>
 
 			{playerCharacter?.background && (
-				<div className="p-4 bg-[#050505] border border-stone-800 rounded-xl relative">
-					<span className="text-[10px] uppercase font-cinzel font-bold tracking-[0.2em] text-amber-900/80 absolute -top-2.5 left-4 bg-[#0a0a0a] px-2 block">Background</span>
-					<p className="text-sm font-inter text-stone-400 italic leading-relaxed">"{playerCharacter.background}"</p>
+				<div className="relative rounded-[24px] border border-white/7 bg-white/[0.02] p-4">
+					<span className="absolute -top-2.5 left-4 block bg-[#0e0e10] px-2 text-[0.58rem] uppercase tracking-[0.24em] text-stone-500">Background</span>
+					<p className="text-[0.8rem] italic leading-relaxed text-stone-400">"{playerCharacter.background}"</p>
 				</div>
 			)}
 		</div>
@@ -553,15 +605,15 @@ function SkillsMenu() {
 				{ name: 'Second Wind', type: 'Recovery', cost: '1 Bonus', desc: 'Draw on your stamina to recover some hit points.' },
 				{ name: 'Intimidate', type: 'Social', cost: 'Action', desc: 'Attempt to force an enemy to flee through a show of force.' },
 			].map((skill, idx) => (
-				<div key={idx} className="p-4 bg-[#050505] border border-stone-800 rounded-xl shadow-inner hover:border-amber-900/40 transition-colors group">
+				<div key={idx} className="group rounded-[24px] border border-white/7 bg-[linear-gradient(180deg,rgba(18,18,21,0.96),rgba(11,11,13,0.96))] p-4 transition-colors hover:border-amber-400/20">
 					<div className="flex justify-between items-start mb-2">
-						<span className="font-bold font-cinzel tracking-wider text-amber-200 uppercase">{skill.name}</span>
+						<span className="font-cinzel text-[0.88rem] font-semibold uppercase tracking-[0.12em] text-amber-100">{skill.name}</span>
 						<div className="flex flex-col items-end gap-1">
-							<span className="text-[10px] font-inter uppercase tracking-widest text-stone-500 bg-stone-900 px-2 py-0.5 rounded border border-stone-800">{skill.type}</span>
-							<span className="text-[10px] text-amber-700/80 font-bold">{skill.cost}</span>
+							<span className="rounded-full border border-white/7 bg-white/[0.03] px-2 py-0.5 text-[0.58rem] uppercase tracking-[0.22em] text-stone-500">{skill.type}</span>
+							<span className="text-[0.62rem] font-semibold uppercase tracking-[0.16em] text-amber-300/75">{skill.cost}</span>
 						</div>
 					</div>
-					<p className="text-xs font-inter text-stone-400 leading-relaxed">
+					<p className="text-[0.78rem] leading-relaxed text-stone-400">
 						{skill.desc}
 					</p>
 				</div>
@@ -573,16 +625,16 @@ function SkillsMenu() {
 function DiceMenu({ triggerRoll }: { triggerRoll: (t: DiceType) => void; }) {
 	return (
 		<div className="p-6">
-			<h4 className="text-amber-500/50 font-cinzel font-bold text-xs uppercase tracking-[0.3em] mb-4 text-center">Cast the Bones</h4>
+			<h4 className="mb-4 text-center font-cinzel text-[0.74rem] font-semibold uppercase tracking-[0.3em] text-stone-400">Cast the Bones</h4>
 			<div className="grid grid-cols-3 gap-4 max-w-[280px] mx-auto">
 				{['d4', 'd6', 'd8', 'd10', 'd12', 'd20'].map(d => (
 					<button
 						key={d}
 						onClick={() => triggerRoll(d as DiceType)}
-						className={`py-4 text-base font-cinzel font-bold tracking-widest rounded-xl border transition-all duration-300 shadow-inner group
+						className={`rounded-[20px] border py-4 text-[0.96rem] font-cinzel font-semibold uppercase tracking-[0.16em] transition-all duration-300 group
                             ${d === 'd20'
-								? 'bg-gradient-to-b from-amber-900/30 to-amber-900/10 border-amber-500/50 text-amber-400 hover:border-amber-400 hover:shadow-[0_0_20px_rgba(245,158,11,0.3)] hover:-translate-y-1'
-								: 'bg-[#050505] border-stone-800 text-stone-400 hover:bg-[#0a0a0a] hover:border-stone-600 hover:text-amber-200 hover:-translate-y-0.5'}`}
+								? 'border-amber-400/34 bg-[linear-gradient(180deg,rgba(93,61,22,0.42),rgba(19,18,16,0.96))] text-amber-200 hover:border-amber-300 hover:shadow-[0_0_20px_rgba(245,158,11,0.18)] hover:-translate-y-1'
+								: 'border-white/7 bg-[linear-gradient(180deg,rgba(18,18,21,0.96),rgba(11,11,13,0.96))] text-stone-400 hover:border-white/14 hover:text-amber-100 hover:-translate-y-0.5'}`}
 					>
 						<span className="group-hover:scale-110 transition-transform block">{d}</span>
 					</button>

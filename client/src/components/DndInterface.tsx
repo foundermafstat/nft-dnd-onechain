@@ -148,19 +148,23 @@ export default function DndInterface({ playerId, walletAddress }: DndInterfacePr
 
     return (
         <DndContext onDragStart={handleDragStart} onDragEnd={handleDragEnd} collisionDetection={pointerWithin}>
-            <div className="flex flex-col h-screen w-full bg-[#050505] text-amber-50 overflow-hidden font-inter selection:bg-amber-900/50 selection:text-amber-100">
+            <div className="relative flex h-screen w-full flex-col overflow-hidden bg-[#040404] text-amber-50 font-inter selection:bg-amber-900/50 selection:text-amber-100">
+                <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(245,158,11,0.10),transparent_28%),radial-gradient(circle_at_82%_18%,rgba(16,185,129,0.08),transparent_20%),linear-gradient(180deg,#050505_0%,#020202_100%)]" />
+                <div className="pointer-events-none absolute inset-0 opacity-40 [background-image:linear-gradient(rgba(255,255,255,0.025)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.025)_1px,transparent_1px)] [background-size:72px_72px]" />
                 {/* Global Header */}
                 <Header walletAddress={walletAddress} />
 
                 {/* Resizable Workspaces */}
-                <ResizablePanelGroup direction="horizontal" className="flex-1 w-full h-full">
+                <ResizablePanelGroup direction="horizontal" className="relative z-10 flex-1 w-full h-full">
 
                     {/* Left Panel: Game Canvas Area */}
-                    <ResizablePanel defaultSize={60} minSize={30} className="relative h-full flex flex-col bg-[#0a0a0a]">
+                    <ResizablePanel defaultSize={60} minSize={30} className="relative h-full flex flex-col bg-[#050505]">
+                        <div className="pointer-events-none absolute inset-0 z-0 bg-[radial-gradient(circle_at_center,rgba(255,255,255,0.04),transparent_48%),linear-gradient(180deg,rgba(255,255,255,0.02),transparent_16%,transparent_84%,rgba(255,255,255,0.02))]" />
 
                         {/* The 3D Canvas */}
-                        <div className="w-full h-full relative cursor-crosshair">
+                        <div className="w-full h-full relative cursor-crosshair overflow-hidden">
                             <GameCanvas playerId={playerId} />
+                            <div className="pointer-events-none absolute inset-0 shadow-[inset_0_0_120px_rgba(0,0,0,0.92),inset_0_0_24px_rgba(245,158,11,0.08)]" />
 
                             {diceType === 'ZK_LOOT' ? (
                                 <ZkDiceOverlay
@@ -189,10 +193,11 @@ export default function DndInterface({ playerId, walletAddress }: DndInterfacePr
                     </ResizablePanel>
 
                     {/* Central Handle */}
-                    <ResizableHandle withHandle className="bg-amber-900/30 w-1.5 hover:bg-amber-500/50 hover:w-2 transition-all" />
+                    <ResizableHandle withHandle className="relative z-20 w-2 bg-transparent transition-all before:absolute before:inset-y-0 before:left-1/2 before:w-px before:-translate-x-1/2 before:bg-gradient-to-b before:from-transparent before:via-amber-600/60 before:to-transparent hover:before:via-amber-300/80" />
 
                     {/* Right Panel: Interaction & Chat */}
-                    <ResizablePanel defaultSize={40} minSize={25} className="h-full flex flex-col bg-[#050505] border-l border-amber-900/20 shadow-[-10px_0_30px_rgba(0,0,0,0.5)]">
+                    <ResizablePanel defaultSize={40} minSize={25} className="relative h-full flex flex-col border-l border-amber-900/20 bg-[linear-gradient(180deg,rgba(18,15,13,0.98)_0%,rgba(12,10,9,0.98)_100%)] shadow-[-20px_0_60px_rgba(0,0,0,0.72)]">
+                        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(245,158,11,0.08),transparent_26%),linear-gradient(180deg,rgba(255,255,255,0.02),transparent_18%,transparent_82%,rgba(255,255,255,0.02))]" />
                         <InteractionPanel triggerRoll={triggerRoll} />
                     </ResizablePanel>
 
