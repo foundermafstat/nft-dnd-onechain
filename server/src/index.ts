@@ -6,12 +6,12 @@ import multer from 'multer';
 import CryptoJS from 'crypto-js';
 
 import { supabase } from './db/supabase';
-import { uploadToIPFS } from './services/ipfs';
+import { uploadToIPFS, uploadJsonToIPFS } from './services/ipfs';
 import { upsertPlayerByWallet } from './db/playerQueries';
 import { createCharacter, getCharacterById, getCharactersByPlayerId } from './db/characterQueries';
 import { createQuest, finishQuest, getAllQuests, getQuestById, getQuestHistory, seedLocations, getAllLocations, getLocationById, upsertPlayerPosition, getPlayerPosition, getPlayersInLocation } from './db/questQueries';
 import { getNpcsByLocation, getNpcById, seedNpcs } from './db/npcQueries';
-import { seedItems, getAllTemplateItems, getItemsByCategory, getItemById, createItemInstance, addItemToInventory, getCharacterInventory, removeItemFromInventory, equipItem, unequipItem, updateItemBlockchainInfo } from './db/itemQueries';
+import { seedItems, getAllTemplateItems, getItemsByCategory, getItemById, createItemInstance, createCustomItemInstance, addItemToInventory, getCharacterInventory, removeItemFromInventory, equipItem, unequipItem, updateItemBlockchainInfo } from './db/itemQueries';
 import { seedAbilities, getAllAbilities, getAbilitiesByType, getAbilitiesForClass, getAbilitiesForAncestry, getAbilityById, learnAbility, getCharacterAbilities, forgetAbility, getAbilitiesForProfile } from './db/abilityQueries';
 import { ALL_SEED_LOCATIONS } from './game/locationSeeds';
 import { ALL_SEED_NPCS } from './game/npcSeeds';
@@ -24,6 +24,7 @@ import { CombatEngine } from './combat/CombatEngine';
 import { getCombat } from './db/combatQueries';
 import { ScenarioGenerator } from './ai/ScenarioGenerator';
 import { getRecentChronicles, insertChronicle } from './db/scenarioQueries';
+import { generateQuestNftArtifact } from './ai/nftItemGenerator';
 import { dicepackService } from './services/dicepack';
 import { onechainContractMeta, onechainEntryTargets, isOnechainContractConfigured } from './services/onechainContract';
 
@@ -48,6 +49,15 @@ const upload = multer({ storage: multer.memoryStorage() });
 const openai = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY || '',
 });
+
+function toSlug(input: string): string {
+    return input
+        .toLowerCase()
+        .trim()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 64) || 'nft-item';
+}
 
 app.get('/api/health', (req, res) => {
     res.json({ status: 'ok', message: 'NFT-DND Server is running' });
@@ -171,6 +181,182 @@ app.get('/api/db-check', async (req, res) => {
         res.json({ success: true, connected: !error, error });
     } catch (error: any) {
         res.status(500).json({ error: 'DB check failed', details: error.message });
+    }
+});
+
+// --- NFT ITEM GENERATION (QUEST-AWARE) ---
+
+app.post('/api/nft/generate-from-quest', async (req, res) => {
+    try {
+        const {
+            questId,
+            characterId,
+            locationId,
+            styleHint,
+            explicitPrompt,
+            addToInventory = true,
+            imageModel,
+            imageSize,
+            imageQuality,
+            imageOutputFormat,
+            imageBackground,
+        } = req.body || {};
+
+        if (!questId) {
+            return res.status(400).json({ error: 'questId is required' });
+        }
+
+        const quest = await getQuestById(questId);
+        if (!quest) {
+            return res.status(404).json({ error: 'Quest not found' });
+        }
+
+        const history = await getQuestHistory(questId);
+        const lastHistoryLocationId = history?.[history.length - 1]?.location_id || null;
+        const resolvedLocationId = locationId || lastHistoryLocationId;
+        const location = resolvedLocationId ? await getLocationById(resolvedLocationId) : null;
+
+        const artifact = await generateQuestNftArtifact({
+            questId,
+            questStatus: quest.status,
+            locationId: resolvedLocationId,
+            locationName: location?.name || null,
+            partyMembers: Array.isArray(quest.party_members) ? quest.party_members : [],
+            recentActions: (history || []).slice(-8).map((entry: any) => ({
+                playerAction: entry.player_action,
+                aiNarrative: entry.ai_narrative,
+                engineTrigger: entry.engine_trigger,
+                playerRoll: entry.player_roll,
+            })),
+        }, {
+            styleHint,
+            explicitPrompt,
+            imageModel,
+            imageSize,
+            imageQuality,
+            imageOutputFormat,
+            imageBackground,
+        });
+
+        const ts = Date.now();
+        const slug = toSlug(artifact.name);
+        const imageFileName = `${slug}-${ts}.${artifact.imageExt}`;
+        const imageUpload = await uploadToIPFS(artifact.imageBytes, imageFileName, artifact.imageMimeType);
+
+        const imageIpfsUri = imageUpload.cid ? `ipfs://${imageUpload.cid}` : imageUpload.gatewayUrl;
+        if (!imageIpfsUri) {
+            throw new Error('Image uploaded but no CID/gateway URL returned by Filebase');
+        }
+
+        const metadataPayload = {
+            name: artifact.name,
+            description: artifact.description,
+            image: imageIpfsUri,
+            external_url: imageUpload.gatewayUrl,
+            attributes: [
+                { trait_type: 'rarity', value: artifact.rarity },
+                { trait_type: 'category', value: artifact.category },
+                { trait_type: 'subcategory', value: artifact.subcategory },
+                { trait_type: 'quest_id', value: questId },
+                { trait_type: 'quest_status', value: quest.status },
+                { trait_type: 'location', value: location?.name || resolvedLocationId || 'unknown' },
+            ],
+            lore: artifact.lore,
+            generation: {
+                image_prompt: artifact.imagePrompt,
+                model: imageModel || 'gpt-image-1.5',
+                generated_at: new Date().toISOString(),
+            },
+            context: {
+                recent_actions: (history || []).slice(-6).map((entry: any) => ({
+                    player_action: entry.player_action,
+                    player_roll: entry.player_roll,
+                    engine_trigger: entry.engine_trigger,
+                })),
+            },
+        };
+
+        const metadataFileName = `${slug}-${ts}.metadata.json`;
+        const metadataUpload = await uploadJsonToIPFS(metadataPayload, metadataFileName);
+        const metadataIpfsUri = metadataUpload.cid
+            ? `ipfs://${metadataUpload.cid}`
+            : metadataUpload.gatewayUrl;
+
+        const baseCost = artifact.rarity === 'Legendary'
+            ? 5000
+            : artifact.rarity === 'Epic'
+                ? 2500
+                : artifact.rarity === 'Rare'
+                    ? 1200
+                    : artifact.rarity === 'Uncommon'
+                        ? 500
+                        : 250;
+
+        const itemId = await createCustomItemInstance({
+            name: artifact.name,
+            base_type: artifact.baseType,
+            category: artifact.category,
+            subcategory: artifact.subcategory,
+            rarity: artifact.rarity,
+            is_nft: true,
+            blockchain_status: 'MINTABLE',
+            cost_gp: baseCost,
+            slots: 1,
+            stats: artifact.stats,
+            bonuses: artifact.bonuses,
+            perks: artifact.perks,
+            lore: artifact.lore,
+            class_restrictions: [],
+            metadata: {
+                description: artifact.description,
+                ipfs_image_cid: imageUpload.cid,
+                ipfs_image_url: imageUpload.gatewayUrl,
+                ipfs_metadata_cid: metadataUpload.cid,
+                ipfs_metadata_url: metadataUpload.gatewayUrl,
+                ipfs_metadata_uri: metadataIpfsUri,
+                quest_id: questId,
+                location_id: resolvedLocationId,
+                generated_from: 'quest_context',
+            },
+            is_template: false,
+        });
+
+        if (!itemId) {
+            throw new Error('Failed to persist generated item instance');
+        }
+
+        if (characterId && addToInventory) {
+            const added = await addItemToInventory(characterId, itemId, 1, 'backpack');
+            if (!added) {
+                return res.status(500).json({
+                    error: 'Item generated and saved, but failed to add to character inventory',
+                    itemId,
+                });
+            }
+        }
+
+        const savedItem = await getItemById(itemId);
+        res.json({
+            success: true,
+            item: savedItem,
+            ipfs: {
+                image: imageUpload,
+                metadata: metadataUpload,
+                metadataUri: metadataIpfsUri,
+            },
+            questContext: {
+                questId,
+                questStatus: quest.status,
+                locationId: resolvedLocationId,
+                locationName: location?.name || null,
+            },
+        });
+    } catch (error: any) {
+        console.error('NFT generation from quest failed:', error);
+        res.status(500).json({
+            error: 'Failed to generate NFT item from quest context',
+            details: error.message,
+        });
     }
 });
 

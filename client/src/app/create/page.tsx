@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Image from 'next/image';
 import { ChevronDown, ChevronLeft, Minus, Plus, Save, Sparkles } from 'lucide-react';
 import { HeroClass, Ancestry, ANCESTRIES, calculateModifier } from 'shared';
 import { useAuth } from '@/context/AuthContext';
@@ -24,6 +25,41 @@ const panelClass =
   'rounded-[24px] border border-white/10 bg-[linear-gradient(180deg,rgba(20,20,24,0.9),rgba(11,11,14,0.95))] shadow-[0_18px_36px_rgba(0,0,0,0.42)] backdrop-blur';
 const inputClass =
   'w-full rounded-xl border border-white/12 bg-black/30 px-4 py-3 text-[0.84rem] text-stone-100 placeholder:text-stone-500 focus:border-amber-400/45 focus:outline-none';
+type HeroGender = 'male' | 'female';
+type CreateStep = 'identity' | 'heritage' | 'combat';
+
+const GENDER_OPTIONS: Array<{ value: HeroGender; label: string; iconPath: string }> = [
+  { value: 'male', label: 'Male', iconPath: '/game/gender/dnd-male.png' },
+  { value: 'female', label: 'Female', iconPath: '/game/gender/dnd-female.png' },
+];
+
+const ANCESTRY_IMAGE_SLUG: Record<Ancestry, string> = {
+  [Ancestry.Dwarf]: 'dwarf',
+  [Ancestry.Elf]: 'elf',
+  [Ancestry.Goblin]: 'goblin',
+  [Ancestry.Halfling]: 'halfling',
+  [Ancestry.HalfOrc]: 'half-orc',
+  [Ancestry.Human]: 'human',
+};
+
+const CLASS_ICON_PATH: Record<HeroClass, string> = {
+  [HeroClass.Fighter]: '/game/class/dnd-fighter.png',
+  [HeroClass.Priest]: '/game/class/dnd-priest.png',
+  [HeroClass.Thief]: '/game/class/dnd-thief.png',
+  [HeroClass.Wizard]: '/game/class/dnd-wizard.png',
+};
+
+const ANCESTRY_VISUALS: Record<Ancestry, { glow: string; beam: string }> = {
+  [Ancestry.Dwarf]: { glow: 'rgba(34, 30, 24, 0.58)', beam: 'rgba(34, 30, 24, 0.52)' },
+  [Ancestry.Elf]: { glow: 'rgba(34, 30, 24, 0.58)', beam: 'rgba(34, 30, 24, 0.52)' },
+  [Ancestry.Goblin]: { glow: 'rgba(34, 30, 24, 0.58)', beam: 'rgba(34, 30, 24, 0.52)' },
+  [Ancestry.Halfling]: { glow: 'rgba(34, 30, 24, 0.58)', beam: 'rgba(34, 30, 24, 0.52)' },
+  [Ancestry.HalfOrc]: { glow: 'rgba(34, 30, 24, 0.58)', beam: 'rgba(34, 30, 24, 0.52)' },
+  [Ancestry.Human]: { glow: 'rgba(34, 30, 24, 0.58)', beam: 'rgba(34, 30, 24, 0.52)' },
+};
+
+const getAncestryImagePath = (ancestry: Ancestry, gender: HeroGender): string =>
+  `/game/race/${gender}/${gender}-${ANCESTRY_IMAGE_SLUG[ancestry]}.png`;
 
 function StatRow({
   label,
@@ -90,7 +126,9 @@ export default function CreateHeroPage() {
   const { executor, isExecuting: isWalletExecuting } = useOnechainWalletExecutor();
 
   const [name, setName] = useState('');
+  const [activeStep, setActiveStep] = useState<CreateStep>('identity');
   const [selectedAncestry, setSelectedAncestry] = useState<Ancestry>(Ancestry.Human);
+  const [selectedGender, setSelectedGender] = useState<HeroGender>('male');
   const [selectedClass, setSelectedClass] = useState<HeroClass>(HeroClass.Fighter);
   const [alignment, setAlignment] = useState<Alignment>('Neutral');
   const [deity, setDeity] = useState<string>(defaultDeityForAlignment('Neutral'));
@@ -190,6 +228,21 @@ export default function CreateHeroPage() {
   const availablePoints = TOTAL_POINTS - currentPoints;
   const heroMintQuote = quoteHeroMintCost();
   const titleAtLevelOne = levelOneTitle(selectedClass, alignment);
+  const creationSteps: Array<{ key: CreateStep; label: string; hint: string }> = [
+    { key: 'identity', label: 'Origin', hint: 'Name, ethos, myth' },
+    { key: 'heritage', label: 'Bloodline', hint: 'Gender, race, class' },
+    { key: 'combat', label: 'Loadout', hint: 'Stats and arcana' },
+  ];
+  const activeStepIndex = creationSteps.findIndex((step) => step.key === activeStep);
+  const canProceedToForge = availablePoints === 0 && Boolean(name.trim()) && Boolean(executor);
+  const previewKnownSpells = knownSpellsInput
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const previewTalents = extraTalentsInput
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean);
 
   const handleStatChange = (stat: keyof typeof stats, value: number) => {
     setStats((prev) => ({ ...prev, [stat]: value }));
@@ -220,6 +273,12 @@ export default function CreateHeroPage() {
         }
         if (Object.values(HeroClass).includes(character.class)) {
           setSelectedClass(character.class as HeroClass);
+        }
+        if (typeof character.gender === 'string') {
+          const normalizedGender = character.gender.trim().toLowerCase();
+          if (normalizedGender === 'male' || normalizedGender === 'female') {
+            setSelectedGender(normalizedGender);
+          }
         }
         if (['Lawful', 'Neutral', 'Chaotic'].includes(character.alignment)) {
           setAlignment(character.alignment as Alignment);
@@ -334,6 +393,10 @@ export default function CreateHeroPage() {
           hp_max: maxHp,
           ac,
           state: {
+            appearance: {
+              gender: selectedGender,
+              portrait: getAncestryImagePath(selectedAncestry, selectedGender),
+            },
             onchain: {
               heroSbtMintHash: mintResult.hash,
               heroMintPaidOne: mintResult.paidOne,
@@ -403,398 +466,567 @@ export default function CreateHeroPage() {
 
         <div className="grid grid-cols-1 gap-7 lg:grid-cols-12">
           <div className="space-y-7 lg:col-span-7">
-            <section className={`${panelClass} space-y-5 p-5 md:p-6`}>
-              <div>
-                <label className="mb-2 block text-[0.65rem] uppercase tracking-[0.22em] text-stone-400">
-                  Hero Name
-                </label>
-                <input
-                  type="text"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="Name your legend"
-                  className={`${inputClass} font-cinzel text-lg tracking-[0.06em]`}
-                  maxLength={32}
-                />
-              </div>
-
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <div>
-                  <label className="mb-2 block text-[0.65rem] uppercase tracking-[0.22em] text-stone-400">
-                    Alignment
-                  </label>
-                  <div className="relative">
-                    <select
-                      value={alignment}
-                      onChange={(e) => setAlignment(e.target.value as Alignment)}
-                      className={`${inputClass} appearance-none pr-10`}
-                    >
-                      <option value="Lawful">Lawful</option>
-                      <option value="Neutral">Neutral</option>
-                      <option value="Chaotic">Chaotic</option>
-                    </select>
-                    <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-500" />
-                  </div>
-                </div>
-                <div>
-                  <label className="mb-2 block text-[0.65rem] uppercase tracking-[0.22em] text-stone-400">
-                    Deity
-                  </label>
-                  <div className="relative">
-                    <select
-                      value={deity}
-                      onChange={(e) => setDeity(e.target.value)}
-                      className={`${inputClass} appearance-none pr-10`}
-                    >
-                      {DEITIES_BY_ALIGNMENT[alignment].map((value) => (
-                        <option key={value} value={value}>
-                          {value}
-                        </option>
-                      ))}
-                    </select>
-                    <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-500" />
-                  </div>
-                </div>
-              </div>
-
-              {selectedAncestry === Ancestry.Human && (
-                <div>
-                  <label className="mb-2 block text-[0.65rem] uppercase tracking-[0.22em] text-stone-400">
-                    Human Bonus Language
-                  </label>
-                  <div className="relative">
-                    <select
-                      value={humanExtraLanguage}
-                      onChange={(e) => setHumanExtraLanguage(e.target.value)}
-                      className={`${inputClass} appearance-none pr-10`}
-                    >
-                      {COMMON_LANGUAGES.filter((language) => language !== 'Common').map((language) => (
-                        <option key={language} value={language}>
-                          {language}
-                        </option>
-                      ))}
-                    </select>
-                    <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-500" />
-                  </div>
-                </div>
-              )}
-
-              {selectedClass === HeroClass.Priest && (
-                <div>
-                  <label className="mb-2 block text-[0.65rem] uppercase tracking-[0.22em] text-stone-400">
-                    Priest Sacred Language
-                  </label>
-                  <div className="relative">
-                    <select
-                      value={priestLanguage}
-                      onChange={(e) => setPriestLanguage(e.target.value)}
-                      className={`${inputClass} appearance-none pr-10`}
-                    >
-                      {RARE_LANGUAGES.map((language) => (
-                        <option key={language} value={language}>
-                          {language}
-                        </option>
-                      ))}
-                    </select>
-                    <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-500" />
-                  </div>
-                </div>
-              )}
-
-              {selectedClass === HeroClass.Wizard && (
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <div>
-                    <label className="mb-2 block text-[0.65rem] uppercase tracking-[0.22em] text-stone-400">
-                      Wizard Common Language A
-                    </label>
-                    <div className="relative">
-                      <select
-                        value={wizardCommonLanguageA}
-                        onChange={(e) => setWizardCommonLanguageA(e.target.value)}
-                        className={`${inputClass} appearance-none pr-10`}
-                      >
-                        {COMMON_LANGUAGES.filter((language) => language !== 'Common').map((language) => (
-                          <option key={language} value={language}>
-                            {language}
-                          </option>
-                        ))}
-                      </select>
-                      <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-500" />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="mb-2 block text-[0.65rem] uppercase tracking-[0.22em] text-stone-400">
-                      Wizard Common Language B
-                    </label>
-                    <div className="relative">
-                      <select
-                        value={wizardCommonLanguageB}
-                        onChange={(e) => setWizardCommonLanguageB(e.target.value)}
-                        className={`${inputClass} appearance-none pr-10`}
-                      >
-                        {COMMON_LANGUAGES.filter((language) => language !== 'Common').map((language) => (
-                          <option key={language} value={language}>
-                            {language}
-                          </option>
-                        ))}
-                      </select>
-                      <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-500" />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="mb-2 block text-[0.65rem] uppercase tracking-[0.22em] text-stone-400">
-                      Wizard Rare Language A
-                    </label>
-                    <div className="relative">
-                      <select
-                        value={wizardRareLanguageA}
-                        onChange={(e) => setWizardRareLanguageA(e.target.value)}
-                        className={`${inputClass} appearance-none pr-10`}
-                      >
-                        {RARE_LANGUAGES.map((language) => (
-                          <option key={language} value={language}>
-                            {language}
-                          </option>
-                        ))}
-                      </select>
-                      <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-500" />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="mb-2 block text-[0.65rem] uppercase tracking-[0.22em] text-stone-400">
-                      Wizard Rare Language B
-                    </label>
-                    <div className="relative">
-                      <select
-                        value={wizardRareLanguageB}
-                        onChange={(e) => setWizardRareLanguageB(e.target.value)}
-                        className={`${inputClass} appearance-none pr-10`}
-                      >
-                        {RARE_LANGUAGES.map((language) => (
-                          <option key={language} value={language}>
-                            {language}
-                          </option>
-                        ))}
-                      </select>
-                      <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-500" />
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              <div>
-                <label className="mb-2 block text-[0.65rem] uppercase tracking-[0.22em] text-stone-400">
-                  Background
-                </label>
-                <textarea
-                  value={background}
-                  onChange={(e) => setBackground(e.target.value)}
-                  placeholder="Short origin story and defining motivation..."
-                  className={`${inputClass} custom-scrollbar h-24 resize-none`}
-                />
-              </div>
-
-              {(selectedClass === HeroClass.Priest || selectedClass === HeroClass.Wizard) && (
-                <div>
-                  <label className="mb-2 block text-[0.65rem] uppercase tracking-[0.22em] text-stone-400">
-                    Known Spells (comma separated)
-                  </label>
-                  <input
-                    type="text"
-                    value={knownSpellsInput}
-                    onChange={(e) => setKnownSpellsInput(e.target.value)}
-                    placeholder={
-                      selectedClass === HeroClass.Priest
-                        ? 'Cure Wounds, Holy Weapon'
-                        : 'Magic Missile, Sleep, Shield'
-                    }
-                    className={inputClass}
-                  />
-                </div>
-              )}
-
-              <div>
-                <label className="mb-2 block text-[0.65rem] uppercase tracking-[0.22em] text-stone-400">
-                  Extra Talents Notes (comma separated)
-                </label>
-                <input
-                  type="text"
-                  value={extraTalentsInput}
-                  onChange={(e) => setExtraTalentsInput(e.target.value)}
-                  placeholder="Shield Specialist, Beast Tongue"
-                  className={inputClass}
-                />
-              </div>
-            </section>
-
             <section className={`${panelClass} p-5 md:p-6`}>
-              <h2 className="mb-4 font-cinzel text-lg uppercase tracking-[0.14em] text-stone-100">Ancestry</h2>
-              <div className="mb-5 grid grid-cols-2 gap-2.5 sm:grid-cols-3">
-                {(Object.values(Ancestry) as Ancestry[]).map((anc) => (
-                  <button
-                    key={anc}
-                    onClick={() => setSelectedAncestry(anc)}
-                    className={`rounded-lg border px-3 py-3 font-cinzel text-[0.69rem] uppercase tracking-[0.14em] transition ${
-                      selectedAncestry === anc
-                        ? 'border-amber-300/40 bg-amber-300/[0.1] text-amber-100'
-                        : 'border-white/10 bg-white/[0.02] text-stone-400 hover:border-white/24 hover:text-stone-200'
-                    }`}
-                  >
-                    {ANCESTRIES[anc].name}
-                  </button>
-                ))}
+              <div className="mb-5 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                {creationSteps.map((step, index) => {
+                  const active = activeStep === step.key;
+                  const completed = activeStepIndex > index;
+                  return (
+                    <button
+                      key={step.key}
+                      onClick={() => setActiveStep(step.key)}
+                      className={`rounded-xl border px-4 py-3 text-left transition ${
+                        active
+                          ? 'border-amber-300/45 bg-amber-300/[0.12]'
+                          : completed
+                            ? 'border-emerald-300/30 bg-emerald-300/[0.08]'
+                            : 'border-white/10 bg-white/[0.02] hover:border-white/25'
+                      }`}
+                    >
+                      <p className="font-cinzel text-[0.64rem] uppercase tracking-[0.18em] text-stone-300">
+                        Step {index + 1}
+                      </p>
+                      <p className="mt-1 font-cinzel text-sm uppercase tracking-[0.1em] text-stone-100">
+                        {step.label}
+                      </p>
+                      <p className="mt-1 text-[0.7rem] text-stone-500">{step.hint}</p>
+                    </button>
+                  );
+                })}
               </div>
-              <div className="rounded-xl border border-white/10 bg-black/25 p-4">
-                <div className="mb-2 flex flex-wrap items-center gap-2">
-                  <h3 className="font-cinzel text-base uppercase tracking-[0.08em] text-stone-100">
-                    {ANCESTRIES[selectedAncestry].name}
-                  </h3>
-                  <span className="rounded-full border border-amber-300/30 bg-amber-300/[0.08] px-2 py-0.5 text-[0.6rem] uppercase tracking-[0.16em] text-amber-200">
-                    {ANCESTRIES[selectedAncestry].feature}
-                  </span>
-                </div>
-                <p className="text-[0.8rem] leading-6 text-stone-400">
-                  {ANCESTRIES[selectedAncestry].description}
-                </p>
-                <p className="mt-2 text-[0.68rem] uppercase tracking-[0.15em] text-stone-500">
-                  Languages:{' '}
-                  <span className="normal-case tracking-normal text-stone-300">
-                    {ANCESTRIES[selectedAncestry].languages.join(', ')}
-                  </span>
-                </p>
-              </div>
-            </section>
 
-            <section className={`${panelClass} p-5 md:p-6`}>
-              <h2 className="mb-4 font-cinzel text-lg uppercase tracking-[0.14em] text-stone-100">Class</h2>
-              <div className="grid grid-cols-2 gap-3">
-                {(Object.values(HeroClass) as HeroClass[]).map((heroClass) => (
-                  <button
-                    key={heroClass}
-                    onClick={() => setSelectedClass(heroClass)}
-                    className={`rounded-xl border px-4 py-4 text-left transition ${
-                      selectedClass === heroClass
-                        ? 'border-amber-300/40 bg-amber-300/[0.09]'
-                        : 'border-white/10 bg-white/[0.02] hover:border-white/24'
-                    }`}
-                  >
-                    <div className="font-cinzel text-sm uppercase tracking-[0.13em] text-stone-100">
-                      {heroClass}
+              {activeStep === 'identity' && (
+                <div className="space-y-5">
+                  <div>
+                    <label className="mb-2 block text-[0.65rem] uppercase tracking-[0.22em] text-stone-400">
+                      Hero Name
+                    </label>
+                    <input
+                      type="text"
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      placeholder="Name your legend"
+                      className={`${inputClass} font-cinzel text-lg tracking-[0.06em]`}
+                      maxLength={32}
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <div>
+                      <label className="mb-2 block text-[0.65rem] uppercase tracking-[0.22em] text-stone-400">
+                        Alignment
+                      </label>
+                      <div className="relative">
+                        <select
+                          value={alignment}
+                          onChange={(e) => setAlignment(e.target.value as Alignment)}
+                          className={`${inputClass} appearance-none pr-10`}
+                        >
+                          <option value="Lawful">Lawful</option>
+                          <option value="Neutral">Neutral</option>
+                          <option value="Chaotic">Chaotic</option>
+                        </select>
+                        <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-500" />
+                      </div>
                     </div>
-                    <div className="mt-2 text-[0.72rem] leading-5 text-stone-400">
-                      {heroClass === 'Fighter'
-                        ? 'd8 HP, front-line dominance'
-                        : heroClass === 'Priest'
-                          ? 'd6 HP, divine control'
-                          : heroClass === 'Thief'
-                            ? 'd4 HP, stealth and utility'
-                            : 'd4 HP, arcane burst and control'}
+                    <div>
+                      <label className="mb-2 block text-[0.65rem] uppercase tracking-[0.22em] text-stone-400">
+                        Deity
+                      </label>
+                      <div className="relative">
+                        <select
+                          value={deity}
+                          onChange={(e) => setDeity(e.target.value)}
+                          className={`${inputClass} appearance-none pr-10`}
+                        >
+                          {DEITIES_BY_ALIGNMENT[alignment].map((value) => (
+                            <option key={value} value={value}>
+                              {value}
+                            </option>
+                          ))}
+                        </select>
+                        <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-500" />
+                      </div>
                     </div>
-                  </button>
-                ))}
+                  </div>
+
+                  <div>
+                    <label className="mb-2 block text-[0.65rem] uppercase tracking-[0.22em] text-stone-400">
+                      Background
+                    </label>
+                    <textarea
+                      value={background}
+                      onChange={(e) => setBackground(e.target.value)}
+                      placeholder="Short origin story and defining motivation..."
+                      className={`${inputClass} custom-scrollbar h-28 resize-none`}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {activeStep === 'heritage' && (
+                <div className="space-y-6">
+                  <div>
+                    <label className="mb-2 block text-[0.65rem] uppercase tracking-[0.22em] text-stone-400">
+                      Gender
+                    </label>
+                    <div className="grid grid-cols-2 gap-2.5">
+                      {GENDER_OPTIONS.map((genderOption) => (
+                        <button
+                          key={genderOption.value}
+                          onClick={() => setSelectedGender(genderOption.value)}
+                          className={`flex items-center gap-3 rounded-xl border px-3 py-2.5 transition ${
+                            selectedGender === genderOption.value
+                              ? 'border-amber-300/40 bg-amber-300/[0.1]'
+                              : 'border-white/10 bg-white/[0.02] hover:border-white/24'
+                          }`}
+                        >
+                          <Image
+                            src={genderOption.iconPath}
+                            alt={genderOption.label}
+                            width={28}
+                            height={28}
+                            className="h-7 w-7 rounded-md object-contain"
+                          />
+                          <span className="font-cinzel text-[0.68rem] uppercase tracking-[0.12em] text-stone-200">
+                            {genderOption.label}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <h2 className="mb-3 font-cinzel text-sm uppercase tracking-[0.16em] text-stone-300">Ancestry</h2>
+                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                      {(Object.values(Ancestry) as Ancestry[]).map((anc) => (
+                        <button
+                          key={anc}
+                          onClick={() => setSelectedAncestry(anc)}
+                          className={`group relative aspect-[3/4] overflow-hidden rounded-xl border text-left transition-all duration-300 ${
+                            selectedAncestry === anc
+                              ? 'border-amber-300/45 bg-[linear-gradient(160deg,rgba(214,172,93,0.18),rgba(20,20,28,0.7))] text-amber-100 shadow-[0_10px_24px_rgba(214,172,93,0.22)]'
+                              : 'border-white/12 bg-[linear-gradient(160deg,rgba(34,36,48,0.5),rgba(16,16,22,0.65))] text-stone-300 hover:border-white/28 hover:text-stone-100 hover:shadow-[0_8px_20px_rgba(0,0,0,0.35)]'
+                          }`}
+                          style={{
+                            boxShadow:
+                              selectedAncestry === anc
+                                ? `0 0 0 1px ${ANCESTRY_VISUALS[anc].beam} inset, 0 14px 28px rgba(0,0,0,0.42)`
+                                : undefined,
+                          }}
+                        >
+                          <div className="relative flex h-full flex-col">
+                            <Image
+                              src={getAncestryImagePath(anc, selectedGender)}
+                              alt={`${ANCESTRIES[anc].name} ${selectedGender}`}
+                              width={360}
+                              height={480}
+                              className="h-[82%] w-full object-cover object-top transition-transform duration-300 group-hover:scale-[1.03]"
+                              style={{
+                                filter:
+                                  `drop-shadow(0 10px 20px rgba(0,0,0,0.72)) drop-shadow(0 0 18px ${ANCESTRY_VISUALS[anc].glow})`,
+                              }}
+                            />
+                            <div className="flex h-[18%] items-center justify-center px-2">
+                              <span className="whitespace-nowrap font-cinzel text-[0.7rem] uppercase tracking-[0.14em] text-stone-50 sm:text-[0.72rem]">
+                                {ANCESTRIES[anc].name}
+                              </span>
+                            </div>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <h2 className="mb-3 font-cinzel text-sm uppercase tracking-[0.16em] text-stone-300">Class</h2>
+                    <div className="grid grid-cols-2 gap-3">
+                      {(Object.values(HeroClass) as HeroClass[]).map((heroClass) => (
+                        <button
+                          key={heroClass}
+                          onClick={() => setSelectedClass(heroClass)}
+                          className={`rounded-xl border px-4 py-4 text-left transition ${
+                            selectedClass === heroClass
+                              ? 'border-amber-300/40 bg-amber-300/[0.09]'
+                              : 'border-white/10 bg-white/[0.02] hover:border-white/24'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <Image
+                              src={CLASS_ICON_PATH[heroClass]}
+                              alt={`${heroClass} icon`}
+                              width={28}
+                              height={28}
+                              className="h-7 w-7 rounded-md object-contain"
+                            />
+                            <div className="font-cinzel text-sm uppercase tracking-[0.13em] text-stone-100">
+                              {heroClass}
+                            </div>
+                          </div>
+                          <div className="mt-2 text-[0.72rem] leading-5 text-stone-400">
+                            {heroClass === 'Fighter'
+                              ? 'd8 HP, front-line dominance'
+                              : heroClass === 'Priest'
+                                ? 'd6 HP, divine control'
+                                : heroClass === 'Thief'
+                                  ? 'd4 HP, stealth and utility'
+                                  : 'd4 HP, arcane burst and control'}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {activeStep === 'combat' && (
+                <div className="space-y-5">
+                  <div className="flex items-center justify-between">
+                    <h2 className="font-cinzel text-lg uppercase tracking-[0.14em] text-stone-100">Attributes</h2>
+                    <span
+                      className={`rounded-full border px-2.5 py-1 text-[0.62rem] uppercase tracking-[0.16em] ${
+                        availablePoints > 0
+                          ? 'border-amber-300/35 bg-amber-300/[0.08] text-amber-200'
+                          : availablePoints < 0
+                            ? 'border-rose-300/35 bg-rose-300/[0.08] text-rose-200'
+                            : 'border-emerald-300/35 bg-emerald-300/[0.08] text-emerald-200'
+                      }`}
+                    >
+                      {availablePoints > 0
+                        ? `${availablePoints} left`
+                        : availablePoints < 0
+                          ? `${Math.abs(availablePoints)} over`
+                          : 'complete'}
+                    </span>
+                  </div>
+                  <div className="rounded-xl border border-white/10 bg-black/25 px-4">
+                    <StatRow
+                      label="STR"
+                      value={stats.str}
+                      min={limits.str.min}
+                      max={limits.str.max}
+                      availablePoints={availablePoints}
+                      onChange={(v) => handleStatChange('str', v)}
+                    />
+                    <StatRow
+                      label="DEX"
+                      value={stats.dex}
+                      min={limits.dex.min}
+                      max={limits.dex.max}
+                      availablePoints={availablePoints}
+                      onChange={(v) => handleStatChange('dex', v)}
+                    />
+                    <StatRow
+                      label="CON"
+                      value={stats.con}
+                      min={limits.con.min}
+                      max={limits.con.max}
+                      availablePoints={availablePoints}
+                      onChange={(v) => handleStatChange('con', v)}
+                    />
+                    <StatRow
+                      label="INT"
+                      value={stats.int}
+                      min={limits.int.min}
+                      max={limits.int.max}
+                      availablePoints={availablePoints}
+                      onChange={(v) => handleStatChange('int', v)}
+                    />
+                    <StatRow
+                      label="WIS"
+                      value={stats.wis}
+                      min={limits.wis.min}
+                      max={limits.wis.max}
+                      availablePoints={availablePoints}
+                      onChange={(v) => handleStatChange('wis', v)}
+                    />
+                    <StatRow
+                      label="CHA"
+                      value={stats.cha}
+                      min={limits.cha.min}
+                      max={limits.cha.max}
+                      availablePoints={availablePoints}
+                      onChange={(v) => handleStatChange('cha', v)}
+                    />
+                  </div>
+
+                  {selectedAncestry === Ancestry.Human && (
+                    <div>
+                      <label className="mb-2 block text-[0.65rem] uppercase tracking-[0.22em] text-stone-400">
+                        Human Bonus Language
+                      </label>
+                      <div className="relative">
+                        <select
+                          value={humanExtraLanguage}
+                          onChange={(e) => setHumanExtraLanguage(e.target.value)}
+                          className={`${inputClass} appearance-none pr-10`}
+                        >
+                          {COMMON_LANGUAGES.filter((language) => language !== 'Common').map((language) => (
+                            <option key={language} value={language}>
+                              {language}
+                            </option>
+                          ))}
+                        </select>
+                        <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-500" />
+                      </div>
+                    </div>
+                  )}
+
+                  {selectedClass === HeroClass.Priest && (
+                    <div>
+                      <label className="mb-2 block text-[0.65rem] uppercase tracking-[0.22em] text-stone-400">
+                        Priest Sacred Language
+                      </label>
+                      <div className="relative">
+                        <select
+                          value={priestLanguage}
+                          onChange={(e) => setPriestLanguage(e.target.value)}
+                          className={`${inputClass} appearance-none pr-10`}
+                        >
+                          {RARE_LANGUAGES.map((language) => (
+                            <option key={language} value={language}>
+                              {language}
+                            </option>
+                          ))}
+                        </select>
+                        <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-500" />
+                      </div>
+                    </div>
+                  )}
+
+                  {selectedClass === HeroClass.Wizard && (
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                      <div>
+                        <label className="mb-2 block text-[0.65rem] uppercase tracking-[0.22em] text-stone-400">
+                          Wizard Common Language A
+                        </label>
+                        <div className="relative">
+                          <select
+                            value={wizardCommonLanguageA}
+                            onChange={(e) => setWizardCommonLanguageA(e.target.value)}
+                            className={`${inputClass} appearance-none pr-10`}
+                          >
+                            {COMMON_LANGUAGES.filter((language) => language !== 'Common').map((language) => (
+                              <option key={language} value={language}>
+                                {language}
+                              </option>
+                            ))}
+                          </select>
+                          <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-500" />
+                        </div>
+                      </div>
+                      <div>
+                        <label className="mb-2 block text-[0.65rem] uppercase tracking-[0.22em] text-stone-400">
+                          Wizard Common Language B
+                        </label>
+                        <div className="relative">
+                          <select
+                            value={wizardCommonLanguageB}
+                            onChange={(e) => setWizardCommonLanguageB(e.target.value)}
+                            className={`${inputClass} appearance-none pr-10`}
+                          >
+                            {COMMON_LANGUAGES.filter((language) => language !== 'Common').map((language) => (
+                              <option key={language} value={language}>
+                                {language}
+                              </option>
+                            ))}
+                          </select>
+                          <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-500" />
+                        </div>
+                      </div>
+                      <div>
+                        <label className="mb-2 block text-[0.65rem] uppercase tracking-[0.22em] text-stone-400">
+                          Wizard Rare Language A
+                        </label>
+                        <div className="relative">
+                          <select
+                            value={wizardRareLanguageA}
+                            onChange={(e) => setWizardRareLanguageA(e.target.value)}
+                            className={`${inputClass} appearance-none pr-10`}
+                          >
+                            {RARE_LANGUAGES.map((language) => (
+                              <option key={language} value={language}>
+                                {language}
+                              </option>
+                            ))}
+                          </select>
+                          <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-500" />
+                        </div>
+                      </div>
+                      <div>
+                        <label className="mb-2 block text-[0.65rem] uppercase tracking-[0.22em] text-stone-400">
+                          Wizard Rare Language B
+                        </label>
+                        <div className="relative">
+                          <select
+                            value={wizardRareLanguageB}
+                            onChange={(e) => setWizardRareLanguageB(e.target.value)}
+                            className={`${inputClass} appearance-none pr-10`}
+                          >
+                            {RARE_LANGUAGES.map((language) => (
+                              <option key={language} value={language}>
+                                {language}
+                              </option>
+                            ))}
+                          </select>
+                          <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-500" />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {(selectedClass === HeroClass.Priest || selectedClass === HeroClass.Wizard) && (
+                    <div>
+                      <label className="mb-2 block text-[0.65rem] uppercase tracking-[0.22em] text-stone-400">
+                        Known Spells (comma separated)
+                      </label>
+                      <input
+                        type="text"
+                        value={knownSpellsInput}
+                        onChange={(e) => setKnownSpellsInput(e.target.value)}
+                        placeholder={
+                          selectedClass === HeroClass.Priest
+                            ? 'Cure Wounds, Holy Weapon'
+                            : 'Magic Missile, Sleep, Shield'
+                        }
+                        className={inputClass}
+                      />
+                    </div>
+                  )}
+
+                  <div>
+                    <label className="mb-2 block text-[0.65rem] uppercase tracking-[0.22em] text-stone-400">
+                      Extra Talents Notes (comma separated)
+                    </label>
+                    <input
+                      type="text"
+                      value={extraTalentsInput}
+                      onChange={(e) => setExtraTalentsInput(e.target.value)}
+                      placeholder="Shield Specialist, Beast Tongue"
+                      className={inputClass}
+                    />
+                  </div>
+                </div>
+              )}
+
+              <div className="mt-6 flex items-center justify-between">
+                <button
+                  onClick={() =>
+                    setActiveStep(creationSteps[Math.max(0, activeStepIndex - 1)].key)
+                  }
+                  disabled={activeStepIndex === 0}
+                  className="rounded-lg border border-white/12 px-4 py-2 text-[0.68rem] uppercase tracking-[0.14em] text-stone-300 transition hover:border-white/25 disabled:cursor-not-allowed disabled:opacity-35"
+                >
+                  Previous
+                </button>
+                <button
+                  onClick={() =>
+                    setActiveStep(
+                      creationSteps[Math.min(creationSteps.length - 1, activeStepIndex + 1)].key
+                    )
+                  }
+                  disabled={activeStepIndex === creationSteps.length - 1}
+                  className="rounded-lg border border-amber-300/40 bg-amber-300/[0.1] px-4 py-2 text-[0.68rem] uppercase tracking-[0.14em] text-amber-100 transition hover:bg-amber-300/[0.16] disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Next
+                </button>
               </div>
             </section>
           </div>
 
-          <aside className="space-y-7 lg:col-span-5">
-            <section className={`${panelClass} p-5 md:p-6`}>
-              <div className="mb-4 flex items-center justify-between">
-                <h2 className="font-cinzel text-lg uppercase tracking-[0.14em] text-stone-100">Attributes</h2>
-                <span
-                  className={`rounded-full border px-2.5 py-1 text-[0.62rem] uppercase tracking-[0.16em] ${
-                    availablePoints > 0
-                      ? 'border-amber-300/35 bg-amber-300/[0.08] text-amber-200'
-                      : availablePoints < 0
-                        ? 'border-rose-300/35 bg-rose-300/[0.08] text-rose-200'
-                        : 'border-emerald-300/35 bg-emerald-300/[0.08] text-emerald-200'
-                  }`}
-                >
-                  {availablePoints > 0
-                    ? `${availablePoints} left`
-                    : availablePoints < 0
-                      ? `${Math.abs(availablePoints)} over`
-                      : 'complete'}
-                </span>
-              </div>
-              <div className="rounded-xl border border-white/10 bg-black/25 px-4">
-                <StatRow
-                  label="STR"
-                  value={stats.str}
-                  min={limits.str.min}
-                  max={limits.str.max}
-                  availablePoints={availablePoints}
-                  onChange={(v) => handleStatChange('str', v)}
-                />
-                <StatRow
-                  label="DEX"
-                  value={stats.dex}
-                  min={limits.dex.min}
-                  max={limits.dex.max}
-                  availablePoints={availablePoints}
-                  onChange={(v) => handleStatChange('dex', v)}
-                />
-                <StatRow
-                  label="CON"
-                  value={stats.con}
-                  min={limits.con.min}
-                  max={limits.con.max}
-                  availablePoints={availablePoints}
-                  onChange={(v) => handleStatChange('con', v)}
-                />
-                <StatRow
-                  label="INT"
-                  value={stats.int}
-                  min={limits.int.min}
-                  max={limits.int.max}
-                  availablePoints={availablePoints}
-                  onChange={(v) => handleStatChange('int', v)}
-                />
-                <StatRow
-                  label="WIS"
-                  value={stats.wis}
-                  min={limits.wis.min}
-                  max={limits.wis.max}
-                  availablePoints={availablePoints}
-                  onChange={(v) => handleStatChange('wis', v)}
-                />
-                <StatRow
-                  label="CHA"
-                  value={stats.cha}
-                  min={limits.cha.min}
-                  max={limits.cha.max}
-                  availablePoints={availablePoints}
-                  onChange={(v) => handleStatChange('cha', v)}
-                />
-              </div>
-            </section>
+          <aside className="lg:col-span-5">
+            <div className="lg:sticky lg:top-6">
+              <section className="relative overflow-hidden rounded-[34px] border border-white/12 bg-[linear-gradient(145deg,rgba(18,19,26,0.94),rgba(7,7,10,0.99))] p-5 shadow-[0_28px_70px_rgba(0,0,0,0.55)] md:p-6">
+                <div className="pointer-events-none absolute -right-16 -top-20 h-64 w-64 rounded-[45%_55%_60%_40%/60%_45%_55%_40%] bg-amber-400/18 blur-3xl" />
+                <div className="pointer-events-none absolute -left-20 top-1/3 h-52 w-52 rounded-[58%_42%_41%_59%/52%_58%_42%_48%] bg-sky-400/12 blur-3xl" />
+                <div className="pointer-events-none absolute bottom-[-60px] right-8 h-44 w-56 rounded-[46%_54%_40%_60%/54%_37%_63%_46%] bg-rose-500/10 blur-3xl" />
 
-            <section className={`${panelClass} p-5 md:p-6`}>
-              <p className="mb-2 text-[0.63rem] uppercase tracking-[0.22em] text-stone-500">Hero Summary</p>
-              <h3 className="font-cinzel text-2xl uppercase tracking-[0.08em] text-stone-100">
-                {name || 'Unnamed'}
-              </h3>
-              <p className="mt-2 text-[0.78rem] text-stone-400">
-                Level 1 {titleAtLevelOne} · {alignment} · {selectedAncestry} {selectedClass}
-              </p>
-              <p className="mt-1 text-[0.72rem] text-stone-500">
-                Deity: {deity} · Starting gold: {startingGoldGp} gp
-              </p>
-              <p className="mt-5 text-[0.75rem] leading-6 text-stone-500">
-                Your AI-generated chronicle and in-game decisions will shape future NFT relics tied to this character.
-              </p>
-              <div className="mt-4 rounded-xl border border-amber-300/25 bg-amber-300/[0.06] px-3 py-2 text-[0.68rem] uppercase tracking-[0.14em] text-amber-100/85">
-                Hero SBT mint: {heroMintQuote.totalOne} ONE (incl. gas buffer)
-              </div>
+                <div className="relative mb-5 overflow-hidden rounded-[28px] border border-white/10 bg-[radial-gradient(circle_at_30%_12%,rgba(255,255,255,0.14),rgba(10,10,14,0.94)_62%)]">
+                  <div className="absolute inset-x-10 bottom-4 h-10 rounded-full blur-2xl" style={{ backgroundColor: ANCESTRY_VISUALS[selectedAncestry].glow }} />
+                  <Image
+                    src={getAncestryImagePath(selectedAncestry, selectedGender)}
+                    alt={`${ANCESTRIES[selectedAncestry].name} ${selectedGender}`}
+                    width={680}
+                    height={840}
+                    className="relative z-10 h-[330px] w-full object-contain p-4"
+                    style={{
+                      filter:
+                        'drop-shadow(0 26px 36px rgba(0,0,0,0.88)) drop-shadow(0 0 28px rgba(34,30,24,0.48))',
+                    }}
+                  />
+                </div>
 
-              <button
-                onClick={handleSave}
-                disabled={isSaving || isWalletExecuting || availablePoints !== 0 || !name.trim() || !executor}
-                className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-xl border border-amber-300/45 bg-amber-300/[0.1] px-4 py-3 font-cinzel text-[0.72rem] font-semibold uppercase tracking-[0.18em] text-amber-100 transition hover:bg-amber-300/[0.18] disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <Save className="h-4 w-4" />
-                {isSaving || isWalletExecuting ? 'Forging...' : 'Enter The Game'}
-              </button>
-            </section>
+                <div className="relative space-y-3 rounded-[28px] border border-white/10 bg-black/35 p-4 backdrop-blur">
+                  <p className="text-[0.62rem] uppercase tracking-[0.22em] text-stone-500">Hero Profile</p>
+                  <h3 className="font-cinzel text-2xl uppercase tracking-[0.08em] text-stone-100">
+                    {name || 'Unnamed'}
+                  </h3>
+                  <p className="text-[0.75rem] text-stone-300">
+                    Level 1 {titleAtLevelOne} · {selectedGender} {selectedAncestry} {selectedClass}
+                  </p>
+                  <p className="text-[0.72rem] text-stone-400">
+                    Alignment: {alignment} · Deity: {deity} · AC: {10 + calculateModifier(stats.dex)} · HP:{' '}
+                    {Math.max(
+                      1,
+                      (selectedClass === HeroClass.Fighter
+                        ? 8
+                        : selectedClass === HeroClass.Priest
+                          ? 6
+                          : 4) + calculateModifier(stats.con)
+                    ) + (selectedAncestry === Ancestry.Dwarf ? 2 : 0)}
+                  </p>
+
+                  <div className="grid grid-cols-3 gap-2 rounded-xl border border-white/10 bg-black/30 p-2">
+                    {Object.entries(stats).map(([key, value]) => (
+                      <div key={key} className="rounded-md border border-white/8 bg-black/25 px-2 py-1.5 text-center">
+                        <p className="text-[0.58rem] uppercase tracking-[0.16em] text-stone-500">{key}</p>
+                        <p className="font-cinzel text-sm text-stone-100">{value}</p>
+                      </div>
+                    ))}
+                  </div>
+
+                  <p className="text-[0.72rem] leading-6 text-stone-300/95">
+                    {background || 'No chronicle yet. Give this soul a myth in the Origin tab.'}
+                  </p>
+                  <p className="text-[0.66rem] uppercase tracking-[0.16em] text-stone-500">
+                    Languages:{' '}
+                    <span className="normal-case tracking-normal text-stone-300">
+                      {ANCESTRIES[selectedAncestry].languages.join(', ')}
+                    </span>
+                  </p>
+
+                  {previewKnownSpells.length > 0 && (
+                    <p className="text-[0.66rem] uppercase tracking-[0.16em] text-stone-500">
+                      Spells:{' '}
+                      <span className="normal-case tracking-normal text-stone-300">
+                        {previewKnownSpells.join(', ')}
+                      </span>
+                    </p>
+                  )}
+                  {previewTalents.length > 0 && (
+                    <p className="text-[0.66rem] uppercase tracking-[0.16em] text-stone-500">
+                      Talents:{' '}
+                      <span className="normal-case tracking-normal text-stone-300">
+                        {previewTalents.join(', ')}
+                      </span>
+                    </p>
+                  )}
+
+                  <div className="rounded-xl border border-amber-300/25 bg-amber-300/[0.08] px-3 py-2 text-[0.68rem] uppercase tracking-[0.14em] text-amber-100/90">
+                    Hero SBT mint: {heroMintQuote.totalOne} ONE (incl. gas buffer)
+                  </div>
+
+                  <button
+                    onClick={handleSave}
+                    disabled={isSaving || isWalletExecuting || !canProceedToForge}
+                    className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-amber-300/45 bg-amber-300/[0.12] px-4 py-3 font-cinzel text-[0.72rem] font-semibold uppercase tracking-[0.18em] text-amber-100 transition hover:bg-amber-300/[0.18] disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <Save className="h-4 w-4" />
+                    {isSaving || isWalletExecuting ? 'Forging...' : 'Enter The Game'}
+                  </button>
+                </div>
+              </section>
+            </div>
           </aside>
         </div>
       </div>

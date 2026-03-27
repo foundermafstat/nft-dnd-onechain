@@ -120,6 +120,48 @@ export async function createItemInstance(
     return data.id;
 }
 
+/**
+ * Create a fully custom item instance (not based on a template).
+ * Useful for AI-generated NFT loot tied to a specific quest context.
+ */
+export async function createCustomItemInstance(
+    input: Omit<ItemData, 'id' | 'is_template'> & { is_template?: boolean },
+): Promise<string | null> {
+    const payload: any = {
+        name: input.name,
+        base_type: input.base_type,
+        category: input.category,
+        subcategory: input.subcategory,
+        rarity: input.rarity,
+        is_nft: input.is_nft ?? false,
+        blockchain_status: input.blockchain_status ?? 'OFF_CHAIN',
+        onechain_token_id: input.onechain_token_id,
+        cost_gp: input.cost_gp ?? 0,
+        slots: input.slots ?? 1,
+        stats: input.stats ?? {},
+        bonuses: input.bonuses ?? {},
+        perks: input.perks ?? [],
+        lore: input.lore,
+        class_restrictions: input.class_restrictions ?? [],
+        is_template: false,
+        parent_template_id: input.parent_template_id,
+        metadata: input.metadata ?? {},
+    };
+
+    const { data, error } = await supabase
+        .from('items')
+        .insert(payload)
+        .select('id')
+        .single();
+
+    if (error) {
+        console.error('Error creating custom item instance:', error);
+        return null;
+    }
+
+    return data.id;
+}
+
 // ── Character inventory ────────────────────────────────────────────
 
 export async function addItemToInventory(
