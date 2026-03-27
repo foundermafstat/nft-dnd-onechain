@@ -21,6 +21,8 @@ export interface ChatMessage {
     timestamp: number;
     flavorText?: string;
     flavorPosition?: 'top' | 'bottom';
+    txHash?: string;
+    txUrl?: string;
 }
 
 export interface InventoryItem {
@@ -65,6 +67,7 @@ interface GameState {
     chatMessages: ChatMessage[];
     addMessage: (msg: Omit<ChatMessage, 'id' | 'timestamp' | 'flavorText' | 'flavorPosition'> & { flavorText?: string; flavorPosition?: 'top' | 'bottom' }) => void;
     removeMessage: (id: string) => void;
+    removeQuestOfferMessagesForNpc: (npcName: string) => void;
 
     // Inventory
     inventory: InventoryItem[];
@@ -79,6 +82,33 @@ interface GameState {
     // Player Data
     playerCharacter: any | null;
     setPlayerCharacter: (char: any | null) => void;
+
+    // Dice context
+    lastDiceRoll: { type: string; value: number; at: number } | null;
+    setLastDiceRoll: (roll: { type: string; value: number; at?: number } | null) => void;
+    pendingDiceRequest: string | null;
+    setPendingDiceRequest: (dice: string | null) => void;
+
+    resetForAuthSession: () => void;
+}
+
+function buildInitialChatMessages(): ChatMessage[] {
+    return [
+        {
+            id: 'system-start',
+            sender: 'System',
+            senderType: 'system',
+            content: 'Adventure begins...',
+            timestamp: Date.now(),
+        }
+    ];
+}
+
+function buildStarterInventory(): InventoryItem[] {
+    return [
+        { id: crypto.randomUUID(), name: 'Health Potion', description: 'Restores 10 HP', type: 'consumable' },
+        { id: crypto.randomUUID(), name: 'Shortsword', description: '1d6 slashing', type: 'weapon' },
+    ];
 }
 
 export const useGameState = create<GameState>((set) => ({
@@ -103,15 +133,7 @@ export const useGameState = create<GameState>((set) => ({
     activeNpc: null,
     setActiveNpc: (npc) => set({ activeNpc: npc }),
 
-    chatMessages: [
-        {
-            id: 'system-start',
-            sender: 'System',
-            senderType: 'system',
-            content: 'Adventure begins...',
-            timestamp: Date.now(),
-        }
-    ],
+    chatMessages: buildInitialChatMessages(),
     addMessage: (msg) =>
         set((state) => {
             let flavorText = msg.flavorText;
@@ -146,11 +168,16 @@ export const useGameState = create<GameState>((set) => ({
         set((state) => ({
             chatMessages: state.chatMessages.filter((m) => m.id !== id),
         })),
+    removeQuestOfferMessagesForNpc: (npcName) =>
+        set((state) => ({
+            chatMessages: state.chatMessages.filter((m) => {
+                if (m.sender !== npcName || !Array.isArray(m.quickReplies) || m.quickReplies.length === 0) return true;
+                const labels = m.quickReplies.map((reply) => reply.label.trim().toLowerCase());
+                return !(labels.includes('agree') && labels.includes('decline'));
+            }),
+        })),
 
-    inventory: [
-        { id: crypto.randomUUID(), name: 'Health Potion', description: 'Restores 10 HP', type: 'consumable' },
-        { id: crypto.randomUUID(), name: 'Shortsword', description: '1d6 slashing', type: 'weapon' }
-    ],
+    inventory: buildStarterInventory(),
     addToInventory: (item) =>
         set((state) => ({
             inventory: [...state.inventory, item],
@@ -175,4 +202,26 @@ export const useGameState = create<GameState>((set) => ({
 
     playerCharacter: null,
     setPlayerCharacter: (char) => set({ playerCharacter: char }),
+
+    lastDiceRoll: null,
+    setLastDiceRoll: (roll) => set({
+        lastDiceRoll: roll ? { type: roll.type, value: roll.value, at: roll.at ?? Date.now() } : null,
+    }),
+    pendingDiceRequest: null,
+    setPendingDiceRequest: (dice) => set({ pendingDiceRequest: dice }),
+
+    resetForAuthSession: () => set({
+        currentTurn: 'player',
+        testQuestState: 'not_started',
+        activeQuestId: null,
+        testQuestSessionId: null,
+        questFlow: null,
+        activeNpc: null,
+        chatMessages: buildInitialChatMessages(),
+        inventory: buildStarterInventory(),
+        entities: [],
+        playerCharacter: null,
+        lastDiceRoll: null,
+        pendingDiceRequest: null,
+    }),
 }));

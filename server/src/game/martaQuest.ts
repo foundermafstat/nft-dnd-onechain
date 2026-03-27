@@ -11,6 +11,7 @@ import {
 
 export const OLD_MARTA_NPC_ID = '10000000-0000-4000-a000-000000000002';
 export const GRIM_ALDRIC_NPC_ID = '10000000-0000-4000-a000-000000000001';
+export const GUARD_THERON_NPC_ID = '10000000-0000-4000-a000-000000000003';
 export const TAVERN_CELLAR_LOCATION_ID = '00000000-0000-4000-a000-000000000010';
 
 export function buildMartaScenario(seed: number = Date.now()): MartaQuestScenario {
@@ -153,6 +154,66 @@ export function buildInitialAldricFlow(seed: number = Date.now()): MartaQuestFlo
     };
 }
 
+export function buildTheronScenario(): MartaQuestScenario {
+    return {
+        title: 'Watch Oath Trial',
+        synopsis: 'Guard Theron tests your wit and nerve before granting a watch-sealed relic.',
+        steps: [
+            {
+                step: 'talk_to_theron',
+                title: 'Speak with Guard Theron',
+                description: 'Ask for the watch trial.',
+                mandatory: true,
+            },
+            {
+                step: 'answer_theron_q1',
+                title: 'Answer Question One',
+                description: 'Choose the lawful answer to Theron\'s first question.',
+                mandatory: true,
+            },
+            {
+                step: 'answer_theron_q2',
+                title: 'Answer Question Two',
+                description: 'Choose the correct tactical answer.',
+                mandatory: true,
+            },
+            {
+                step: 'roll_d20',
+                title: 'Roll D20',
+                description: 'Roll a d20. A roll above 5 completes the trial.',
+                mandatory: true,
+            },
+            {
+                step: 'turn_in',
+                title: 'Mint Watch Relic',
+                description: 'On success, generate and mint an NFT relic.',
+                mandatory: true,
+            },
+        ],
+    };
+}
+
+export function buildInitialTheronFlow(seed: number = Date.now()): MartaQuestFlow {
+    return {
+        questLine: 'theron',
+        state: 'OFFERED_BY_THERON',
+        branch: 'pending',
+        combatOutcome: null,
+        scenario: buildTheronScenario(),
+        questGiverNpcId: GUARD_THERON_NPC_ID,
+        sessionId: null,
+        rewardResolution: null,
+        rewardDraft: null,
+        metadata: {
+            theronQuestionIndex: 0,
+            theronCorrectAnswers: 0,
+            theronRollRequired: false,
+            theronRollResult: null,
+            seed,
+        },
+    };
+}
+
 export function rollD20(rng: () => number = Math.random): number {
     return Math.floor(rng() * 20) + 1;
 }
@@ -234,5 +295,15 @@ export function buildAldricRewardDraft(questId: string) {
         rarityTier: 4,
         metadataCid: `aldric-meta-${questId}-${Date.now()}`,
         loreCid: `aldric-lore-${questId}-${Date.now()}`,
+    };
+}
+
+export function buildTheronRewardDraft(questId: string, roll: number) {
+    const rarityTier = roll >= 18 ? 5 : roll >= 12 ? 4 : 3;
+    return {
+        name: 'Theron Watch Sigil',
+        rarityTier,
+        metadataCid: `theron-meta-${questId}-${roll}`,
+        loreCid: `theron-lore-${questId}-${Date.now()}`,
     };
 }

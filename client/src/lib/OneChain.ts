@@ -14,7 +14,7 @@ import {
   isOnechainObjectId,
   statsMeetLimits,
 } from 'shared';
-import { Transaction } from '@mysten/sui/transactions';
+import { Transaction } from '@onelabs/sui/transactions';
 
 type TxKind =
   | 'hero_sbt_mint'
@@ -171,6 +171,25 @@ function oneToMist(one: number): number {
 
 function normalizeAddress(address: string): string {
   return address.trim().toLowerCase();
+}
+
+function isUserRejectedRequest(error: unknown): boolean {
+  const raw =
+    typeof error === 'string'
+      ? error
+      : ((error as any)?.message || (error as any)?.toString?.() || '');
+  const text = String(raw).toLowerCase();
+  if (!text || text === '[object object]') {
+    return true;
+  }
+  return (
+    text.includes('user rejected') ||
+    text.includes('request rejected') ||
+    text.includes('rejected the request') ||
+    text.includes('denied') ||
+    text.includes('cancelled') ||
+    text.includes('canceled')
+  );
 }
 
 function isHeroClass(value: string): value is HeroClass {
@@ -414,11 +433,13 @@ export async function mintHeroSBT(
       parseGasFeeOne(execution),
     );
   } catch (error: any) {
-    console.error('Error minting hero SBT on OneChain:', error);
+    // Some wallet errors have non-enumerable properties, so we try to expose them
+    const errorDetails = error?.message || (typeof error === 'object' ? JSON.stringify(error, Object.getOwnPropertyNames(error)) : String(error));
+    console.error('Error minting hero SBT on OneChain:', errorDetails);
     return {
       success: false,
       kind: 'hero_sbt_mint',
-      error: error?.message || 'Failed to mint hero SBT on OneChain',
+      error: errorDetails || 'Failed to mint hero SBT on OneChain',
     };
   }
 }
@@ -545,7 +566,9 @@ export async function startAdventureWithPrepay(
       sessionId: adventureId,
     };
   } catch (error: any) {
-    console.error('Error starting adventure on OneChain:', error);
+    if (!isUserRejectedRequest(error)) {
+      console.warn('Failed to start adventure on OneChain:', error);
+    }
     return {
       success: false,
       kind: 'adventure_prepay',

@@ -2,7 +2,7 @@
 
 import { useEffect } from 'react';
 import { LogIn } from 'lucide-react';
-import { ConnectModal, useCurrentAccount, useCurrentWallet } from '@mysten/dapp-kit';
+import { ConnectModal, useCurrentAccount, useCurrentWallet } from '@onelabs/dapp-kit';
 import { useAuth } from '@/context/AuthContext';
 
 interface AuthButtonProps {

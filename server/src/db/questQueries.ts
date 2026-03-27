@@ -167,6 +167,7 @@ export async function updateQuestFlowState(
     const statChanges = (quest.stat_changes && typeof quest.stat_changes === 'object') ? quest.stat_changes : {};
     const flow = (statChanges.flow && typeof statChanges.flow === 'object') ? statChanges.flow : {};
     const timeline = Array.isArray(statChanges.timeline) ? statChanges.timeline : [];
+    const flowMetadata = (flow.metadata && typeof flow.metadata === 'object') ? flow.metadata : {};
 
     const nextFlow = {
         ...flow,
@@ -176,6 +177,10 @@ export async function updateQuestFlowState(
         sessionId: input.sessionId !== undefined ? input.sessionId : (flow.sessionId ?? null),
         rewardResolution: input.rewardResolution !== undefined ? input.rewardResolution : (flow.rewardResolution ?? null),
         rewardDraft: input.rewardDraft !== undefined ? input.rewardDraft : (flow.rewardDraft ?? null),
+        metadata: {
+            ...flowMetadata,
+            ...(input.metadata || {}),
+        },
         updatedAt: new Date().toISOString(),
     };
 
@@ -184,7 +189,6 @@ export async function updateQuestFlowState(
         .update({
             stat_changes: {
                 ...statChanges,
-                ...input.metadata,
                 flow: nextFlow,
                 timeline: [
                     ...timeline,
@@ -259,11 +263,10 @@ export async function getLocationById(locationId: string): Promise<any | null> {
         .select('*')
         .eq('id', locationId)
         .single();
-    if (error) {
+    if (error && error.code !== 'PGRST116') {
         console.error('Error fetching location:', error);
-        return null;
     }
-    return data;
+    return data || null;
 }
 
 // === PLAYER POSITIONS ===

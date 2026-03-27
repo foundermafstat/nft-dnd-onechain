@@ -15,7 +15,7 @@ interface DndInterfaceProps {
 }
 
 export default function DndInterface({ playerId, walletAddress }: DndInterfaceProps) {
-    const { inventory, addToInventory, removeFromInventory, addMessage, testQuestSessionId } = useGameState();
+    const { inventory, addToInventory, removeFromInventory, addMessage, testQuestSessionId, setLastDiceRoll } = useGameState();
     const [activeDragId, setActiveDragId] = useState<string | null>(null);
     const [activeDragSource, setActiveDragSource] = useState<'chat' | 'inventory' | null>(null);
 
@@ -62,6 +62,7 @@ export default function DndInterface({ playerId, walletAddress }: DndInterfacePr
                     }
 
                     setDiceResult(roll.roll);
+                    setLastDiceRoll({ type, value: roll.roll });
                     addMessage({
                         sender: 'System',
                         senderType: 'system',
@@ -70,6 +71,7 @@ export default function DndInterface({ playerId, walletAddress }: DndInterfacePr
                 } else {
                     const result = Math.floor(Math.random() * max) + 1;
                     setDiceResult(result);
+                    setLastDiceRoll({ type, value: result });
                     addMessage({
                         sender: 'Player',
                         senderType: 'player',

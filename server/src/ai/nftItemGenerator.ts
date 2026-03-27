@@ -53,12 +53,14 @@ export interface GeneratedQuestNftArtifact {
 }
 
 const UNIFIED_NFT_ITEM_ART_STYLE = [
-    'single centered fantasy item sprite',
-    'dark fantasy relic aesthetic',
+    'single centered fantasy item icon',
+    'dark fantasy relic aesthetic, gritty but readable',
+    'transparent background only (alpha), no backdrop or scenery',
+    'square icon composition intended for 512x512 output',
     'clean silhouette and readable shape language',
     'subtle rim lighting, restrained palette, high contrast edges',
-    'no character, no background scene, no text, no watermark, no UI',
-    'production-ready game asset presentation',
+    'no character, no text, no watermark, no UI',
+    'production-ready inventory game asset presentation',
 ].join(', ');
 
 interface GeneratedArtifactPayload {

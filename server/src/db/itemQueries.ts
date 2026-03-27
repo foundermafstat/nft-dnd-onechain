@@ -264,3 +264,71 @@ export async function updateItemBlockchainInfo(
     }
     return true;
 }
+
+export interface QuestRewardTxInfo {
+    item_id: string;
+    item_name: string;
+    tx_hash: string;
+    onechain_token_id: string | null;
+    metadata_cid?: string;
+    lore_cid?: string;
+    image_url?: string;
+    created_at?: string;
+}
+
+export async function getQuestRewardTransactions(questId: string): Promise<QuestRewardTxInfo[]> {
+    const normalizedQuestId = String(questId || '').trim();
+    if (!normalizedQuestId) return [];
+
+    const { data, error } = await supabase
+        .from('items')
+        .select('id, name, onechain_token_id, metadata')
+        .eq('is_nft', true)
+        .limit(500);
+
+    if (error) {
+        console.error('Error fetching quest reward transactions:', error);
+        return [];
+    }
+
+    const rows = (data || []) as Array<{
+        id: string;
+        name: string;
+        onechain_token_id?: string | null;
+        metadata?: Record<string, any> | null;
+    }>;
+
+    return rows
+        .map((row) => {
+            const metadata = (row.metadata && typeof row.metadata === 'object') ? row.metadata : {};
+            const metadataCid = String(metadata.metadataCid || metadata.cid || '');
+            const loreCid = String(metadata.loreCid || '');
+            const txHash = String(metadata.txHash || '').trim();
+            const imageUrl = String(
+                metadata.image ||
+                metadata.imageUrl ||
+                metadata.nftImage ||
+                metadata.nftImageUrl ||
+                metadata.ipfs_image_url ||
+                metadata.media?.image ||
+                '',
+            ).trim();
+
+            const belongsToQuest =
+                metadataCid.includes(normalizedQuestId) ||
+                loreCid.includes(normalizedQuestId);
+
+            if (!belongsToQuest || !txHash) return null;
+
+            return {
+                item_id: row.id,
+                item_name: row.name,
+                tx_hash: txHash,
+                onechain_token_id: row.onechain_token_id || null,
+                metadata_cid: metadataCid || undefined,
+                lore_cid: loreCid || undefined,
+                image_url: imageUrl || undefined,
+            } satisfies QuestRewardTxInfo;
+        })
+        .filter(Boolean) as QuestRewardTxInfo[];
+}

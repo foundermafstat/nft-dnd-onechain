@@ -11,7 +11,7 @@ import { upsertPlayerByWallet } from './db/playerQueries';
 import { applyQuestProgressToCharacter, createCharacter, getCharacterById, getCharactersByPlayerId } from './db/characterQueries';
 import { createQuest, createQuestWithFlow, finishQuest, getAllQuests, getLatestInProgressQuestForPlayer, getQuestById, getQuestHistory, insertQuestHistory, seedLocations, getAllLocations, getLocationById, upsertPlayerPosition, getPlayerPosition, getPlayersInLocation, updateQuestFlowState } from './db/questQueries';
 import { getNpcsByLocation, getNpcById, seedNpcs } from './db/npcQueries';
-import { seedItems, getAllTemplateItems, getItemsByCategory, getItemById, createItemInstance, createCustomItemInstance, addItemToInventory, getCharacterInventory, removeItemFromInventory, equipItem, unequipItem, updateItemBlockchainInfo } from './db/itemQueries';
+import { seedItems, getAllTemplateItems, getItemsByCategory, getItemById, createItemInstance, createCustomItemInstance, addItemToInventory, getCharacterInventory, removeItemFromInventory, equipItem, unequipItem, updateItemBlockchainInfo, getQuestRewardTransactions } from './db/itemQueries';
 import { seedAbilities, getAllAbilities, getAbilitiesByType, getAbilitiesForClass, getAbilitiesForAncestry, getAbilityById, learnAbility, getCharacterAbilities, forgetAbility, getAbilitiesForProfile } from './db/abilityQueries';
 import { ALL_SEED_LOCATIONS } from './game/locationSeeds';
 import { ALL_SEED_NPCS } from './game/npcSeeds';
@@ -31,8 +31,11 @@ import {
     buildAldricRewardDraft,
     buildInitialAldricFlow,
     buildInitialMartaFlow,
+    buildInitialTheronFlow,
     buildRewardDraft,
+    buildTheronRewardDraft,
     computeQuestProgressDelta,
+    GUARD_THERON_NPC_ID,
     GRIM_ALDRIC_NPC_ID,
     OLD_MARTA_NPC_ID,
     resolveRewardFromOutcome,
@@ -135,17 +138,43 @@ function isQuestInProgressState(state: unknown): boolean {
     return !isQuestCompletedState(state);
 }
 
-function getQuestLine(flow: any): 'marta' | 'aldric' | null {
+function getQuestLine(flow: any): 'marta' | 'aldric' | 'theron' | null {
     if (!flow || typeof flow !== 'object') return null;
-    if (flow.questLine === 'marta' || flow.questLine === 'aldric') return flow.questLine;
+    if (flow.questLine === 'marta' || flow.questLine === 'aldric' || flow.questLine === 'theron') return flow.questLine;
     if (flow.martaNpcId === OLD_MARTA_NPC_ID || flow.questGiverNpcId === OLD_MARTA_NPC_ID) return 'marta';
     if (flow.questGiverNpcId === GRIM_ALDRIC_NPC_ID) return 'aldric';
+    if (flow.questGiverNpcId === GUARD_THERON_NPC_ID) return 'theron';
     return null;
 }
 
+function buildDbLocationFromSeed(seedLocation: any) {
+    return {
+        id: seedLocation.id,
+        name: seedLocation.name,
+        biome_type: seedLocation.biome_type,
+        room_type: seedLocation.room_type,
+        threat_level: seedLocation.threat_level,
+        coordinates: {
+            width: seedLocation.width,
+            height: seedLocation.height,
+            tiles: seedLocation.tiles,
+            spawn_points: seedLocation.spawn_points || [],
+            exits: seedLocation.exits || [],
+        },
+    };
+}
+
 async function buildLocationContext(locationId: string, playerId: string) {
-    const location = await getLocationById(locationId);
-    if (!location) return null;
+    let location = await getLocationById(locationId);
+    if (!location) {
+        const seeded = ALL_SEED_LOCATIONS.find((loc) => loc.id === locationId);
+        if (!seeded) return null;
+
+        const synthesized = buildDbLocationFromSeed(seeded);
+        // Self-heal missing seeded location rows in Supabase.
+        await seedLocations([synthesized]);
+        location = synthesized;
+    }
 
     const coordinates = location.coordinates && typeof location.coordinates === 'object' ? location.coordinates : {};
     const exits = Array.isArray(coordinates.exits) ? [...coordinates.exits] : [];
@@ -159,7 +188,12 @@ async function buildLocationContext(locationId: string, playerId: string) {
             active &&
             activeFlow &&
             activeLine === 'aldric' &&
-            (activeFlow.state === 'COMBAT_REQUIRED' || activeFlow.state === 'ADVENTURE_ACTIVE' || activeFlow.state === 'RETURN_TO_ALDRIC') &&
+            (
+                activeFlow.state === 'COMBAT_REQUIRED' ||
+                activeFlow.state === 'ADVENTURE_ACTIVE' ||
+                activeFlow.state === 'RETURN_TO_ALDRIC' ||
+                activeFlow?.metadata?.cellarEntranceEnabled === true
+            ) &&
             !isQuestCompletedState(activeFlow.state)
         ) {
             exits.push({
@@ -794,6 +828,146 @@ app.post('/api/character/:id/inventory/add', async (req, res) => {
         res.json({ success: true, itemId });
     } catch (error: any) {
         res.status(500).json({ error: 'Add item failed', details: error.message });
+    }
+});
+
+app.post('/api/character/:id/inventory/add-custom', async (req, res) => {
+    try {
+        const characterId = String(req.params.id || '').trim();
+        if (!characterId) return res.status(400).json({ error: 'character id is required' });
+
+        const {
+            name,
+            rarityTier,
+            metadataCid,
+            loreCid,
+            onechainTokenId,
+            txHash,
+            questId,
+        } = req.body || {};
+
+        const rarity = Number(rarityTier) >= 5 ? 'Legendary' : Number(rarityTier) >= 4 ? 'Epic' : 'Rare';
+        const parsedQuestIdFromCid =
+            String(metadataCid || '').match(
+                /([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})/i,
+            )?.[1] || null;
+        const resolvedQuestId = String(questId || parsedQuestIdFromCid || '').trim();
+
+        let generatedLore = String(loreCid || '').trim();
+        let generatedDescription = '';
+        let imageUri = '';
+        let imageGatewayUrl = '';
+        let metadataUri = '';
+        let metadataGatewayUrl = '';
+        let metadataStoredCid = '';
+
+        try {
+            if (resolvedQuestId) {
+                const quest = await getQuestById(resolvedQuestId);
+                if (quest) {
+                    const history = await getQuestHistory(resolvedQuestId);
+                    const lastHistoryLocationId = history?.[history.length - 1]?.location_id || null;
+                    const location = lastHistoryLocationId ? await getLocationById(lastHistoryLocationId) : null;
+
+                    const artifact = await generateQuestNftArtifact({
+                        questId: resolvedQuestId,
+                        questStatus: quest.status,
+                        locationId: lastHistoryLocationId,
+                        locationName: location?.name || null,
+                        partyMembers: Array.isArray(quest.party_members) ? quest.party_members : [],
+                        recentActions: (history || []).slice(-8).map((entry: any) => ({
+                            playerAction: entry.player_action,
+                            aiNarrative: entry.ai_narrative,
+                            engineTrigger: entry.engine_trigger,
+                            playerRoll: entry.player_roll,
+                        })),
+                    }, {
+                        styleHint:
+                            'Unified NFT item template: dark fantasy game item icon, single centered object, transparent background, square composition, production-ready inventory asset.',
+                    });
+
+                    const ts = Date.now();
+                    const slug = toSlug(String(name || artifact.name || 'quest-relic'));
+                    const imageFileName = `${slug}-${ts}.${artifact.imageExt}`;
+                    const imageUpload = await uploadToIPFS(artifact.imageBytes, imageFileName, artifact.imageMimeType);
+                    const uploadedImageUri = imageUpload.cid ? `ipfs://${imageUpload.cid}` : imageUpload.gatewayUrl;
+                    if (uploadedImageUri) {
+                        imageUri = uploadedImageUri;
+                        imageGatewayUrl = imageUpload.gatewayUrl || '';
+                    }
+
+                    generatedLore = artifact.lore.trim();
+                    generatedDescription = artifact.description.trim();
+
+                    const nftMetadataPayload = {
+                        name: String(name || artifact.name || 'Quest Relic'),
+                        description: generatedDescription,
+                        lore: generatedLore,
+                        image: imageUri || undefined,
+                        external_url: imageGatewayUrl || undefined,
+                        attributes: [
+                            { trait_type: 'rarity', value: rarity },
+                            { trait_type: 'source', value: 'theron_quest_reward' },
+                            { trait_type: 'quest_id', value: resolvedQuestId },
+                            { trait_type: 'token_id', value: String(onechainTokenId || '') },
+                        ],
+                        generation: {
+                            template: 'dark_fantasy_item_unified_v1',
+                            generated_at: new Date().toISOString(),
+                            prompt: artifact.imagePrompt,
+                        },
+                    };
+
+                    const metadataFileName = `${slug}-${ts}.metadata.json`;
+                    const metadataUpload = await uploadJsonToIPFS(nftMetadataPayload, metadataFileName);
+                    metadataStoredCid = metadataUpload.cid || '';
+                    metadataUri = metadataUpload.cid ? `ipfs://${metadataUpload.cid}` : (metadataUpload.gatewayUrl || '');
+                    metadataGatewayUrl = metadataUpload.gatewayUrl || '';
+                }
+            }
+        } catch (generationError) {
+            console.warn('Theron reward media generation failed, saving item without generated media:', generationError);
+        }
+
+        const itemId = await createCustomItemInstance({
+            name: String(name || 'Quest Relic'),
+            base_type: 'Relic',
+            category: 'QuestItem',
+            rarity,
+            is_nft: true,
+            blockchain_status: 'MINTED',
+            onechain_token_id: String(onechainTokenId || ''),
+            cost_gp: 0,
+            slots: 1,
+            stats: {},
+            bonuses: {},
+            perks: [],
+            lore: generatedLore || 'Recovered from the watch trial.',
+            class_restrictions: [],
+            metadata: {
+                source: 'theron_quest_reward',
+                rarityTier: Number(rarityTier) || 3,
+                metadataCid: String(metadataCid || ''),
+                loreCid: String(loreCid || ''),
+                txHash: String(txHash || ''),
+                questId: resolvedQuestId || undefined,
+                shortDescription: generatedDescription || undefined,
+                image: imageUri || undefined,
+                imageUrl: imageGatewayUrl || undefined,
+                ipfsMetadataCid: metadataStoredCid || undefined,
+                ipfsMetadataUri: metadataUri || undefined,
+                ipfsMetadataUrl: metadataGatewayUrl || undefined,
+            },
+            is_template: false,
+        });
+        if (!itemId) return res.status(500).json({ error: 'Failed to create custom NFT item' });
+
+        const added = await addItemToInventory(characterId, itemId, 1, 'backpack');
+        if (!added) return res.status(500).json({ error: 'Failed to add custom NFT item to inventory' });
+
+        return res.json({ success: true, itemId });
+    } catch (error: any) {
+        return res.status(500).json({ error: 'Failed to add custom inventory item', details: error.message });
     }
 });
 
@@ -1634,6 +1808,271 @@ app.post('/api/quest/aldric/turn-in', async (req, res) => {
     }
 });
 
+app.post('/api/quest/decline-offer', async (req, res) => {
+    try {
+        const questId = String(req.body?.questId || '').trim();
+        const playerId = String(req.body?.playerId || '').trim();
+
+        if (!questId || !playerId) {
+            return res.status(400).json({ error: 'questId and playerId are required' });
+        }
+
+        const quest = await getQuestById(questId);
+        if (!quest) return res.status(404).json({ error: 'Quest not found' });
+        if (!Array.isArray(quest.party_members) || !quest.party_members.includes(playerId)) {
+            return res.status(403).json({ error: 'Player is not part of this quest' });
+        }
+
+        const flow = readQuestFlow(quest);
+        if (!flow) return res.status(409).json({ error: 'Quest flow is missing' });
+        if (isQuestCompletedState(flow.state)) {
+            return res.status(409).json({ error: 'Quest is already completed' });
+        }
+        const advanced = await updateQuestFlowState(questId, {
+            state: 'COMPLETED_FAIL',
+            branch: 'fail',
+            combatOutcome: 'fail',
+            timelineReason: 'declined_by_player',
+        });
+        if (!advanced) return res.status(500).json({ error: 'Failed to persist declined offer state' });
+
+        const refreshedQuest = await getQuestById(questId);
+        const finished = await finishQuest(
+            questId,
+            'PartyWiped',
+            false,
+            refreshedQuest?.stat_changes || quest.stat_changes || {},
+        );
+        if (!finished) return res.status(500).json({ error: 'Failed to close declined quest' });
+
+        await insertQuestHistory({
+            quest_id: questId,
+            player_action: 'decline_quest_offer',
+            ai_narrative: 'The offer is declined, and the oath is released.',
+            engine_trigger: 'quest_offer_declined',
+            on_chain_event: false,
+        });
+
+        return res.json({ success: true, questId });
+    } catch (error: any) {
+        return res.status(500).json({ error: 'Failed to decline quest offer', details: error.message });
+    }
+});
+
+const THERON_QUESTIONS = [
+    {
+        id: 'theron_q1',
+        prompt: 'A thief runs into the chapel during curfew. What does a loyal guard do first?',
+        options: [
+            { id: 'q1_a', label: 'Secure civilians and call for backup.' },
+            { id: 'q1_b', label: 'Ignore protocol and chase alone.' },
+            { id: 'q1_c', label: 'Take a bribe and look away.' },
+        ],
+        correctAnswerId: 'q1_a',
+    },
+    {
+        id: 'theron_q2',
+        prompt: 'At the castle gate, undead are spotted at dusk. What is the right command?',
+        options: [
+            { id: 'q2_a', label: 'Open the gate to lure them in.' },
+            { id: 'q2_b', label: 'Hold formation and signal Sergeant Bryn.' },
+            { id: 'q2_c', label: 'Drop weapons and run.' },
+        ],
+        correctAnswerId: 'q2_b',
+    },
+] as const;
+
+app.post('/api/quest/theron/start-dialog', async (req, res) => {
+    try {
+        const playerId = String(req.body?.playerId || '').trim();
+        if (!playerId) return res.status(400).json({ error: 'playerId is required' });
+
+        const active = await getLatestInProgressQuestForPlayer(playerId);
+        const activeFlow = readQuestFlow(active);
+        if (active && activeFlow && isQuestInProgressState(activeFlow.state)) {
+            const activeLine = getQuestLine(activeFlow);
+            return res.json({
+                success: true,
+                alreadyActive: true,
+                questId: active.id,
+                state: activeFlow.state,
+                flow: activeFlow,
+                theronLine: activeLine === 'theron'
+                    ? 'The watch trial is still active. Continue where you left off.'
+                    : 'You are sworn elsewhere. End that oath before taking the watch trial.',
+            });
+        }
+
+        const initialFlow = buildInitialTheronFlow();
+        const questId = await createQuestWithFlow([playerId], initialFlow);
+        if (!questId) return res.status(500).json({ error: 'Failed to create Theron quest' });
+
+        await insertQuestHistory({
+            quest_id: questId,
+            player_action: 'talk_to_guard_theron',
+            ai_narrative: initialFlow.scenario.synopsis,
+            engine_trigger: 'theron_offer',
+            on_chain_event: false,
+        });
+
+        return res.json({
+            success: true,
+            alreadyActive: false,
+            questId,
+            state: initialFlow.state,
+            flow: initialFlow,
+            theronLine: 'Prove your discipline. Answer two watch questions, then roll a d20.',
+            question: THERON_QUESTIONS[0],
+        });
+    } catch (error: any) {
+        return res.status(500).json({ error: 'Failed to start dialog with Guard Theron', details: error.message });
+    }
+});
+
+app.post('/api/quest/theron/answer', async (req, res) => {
+    try {
+        const questId = String(req.body?.questId || '').trim();
+        const playerId = String(req.body?.playerId || '').trim();
+        const answerId = String(req.body?.answerId || '').trim();
+        if (!questId || !playerId || !answerId) {
+            return res.status(400).json({ error: 'questId, playerId and answerId are required' });
+        }
+
+        const quest = await getQuestById(questId);
+        if (!quest) return res.status(404).json({ error: 'Quest not found' });
+        if (!Array.isArray(quest.party_members) || !quest.party_members.includes(playerId)) {
+            return res.status(403).json({ error: 'Player is not part of this quest' });
+        }
+
+        const flow = readQuestFlow(quest);
+        if (!flow) return res.status(409).json({ error: 'Quest flow is missing' });
+        if (getQuestLine(flow) !== 'theron') return res.status(409).json({ error: 'Quest is not owned by Guard Theron' });
+        if (isQuestCompletedState(flow.state)) return res.status(409).json({ error: 'Quest already completed' });
+
+        const metadata = (flow.metadata && typeof flow.metadata === 'object') ? flow.metadata : {};
+        const qIndex = Math.max(0, Math.min(1, Number(metadata.theronQuestionIndex || 0)));
+        const currentQuestion = THERON_QUESTIONS[qIndex];
+        const isCorrect = answerId === currentQuestion.correctAnswerId;
+        const nextCorrect = Number(metadata.theronCorrectAnswers || 0) + (isCorrect ? 1 : 0);
+        const nextIndex = qIndex + 1;
+        const isFinalQuestion = nextIndex >= THERON_QUESTIONS.length;
+
+        const nextState = isFinalQuestion ? 'THERON_ROLL_REQUIRED' : (nextIndex === 1 ? 'THERON_Q2' : 'THERON_Q1');
+        const advanced = await updateQuestFlowState(questId, {
+            state: nextState as any,
+            branch: 'pending',
+            metadata: {
+                theronQuestionIndex: nextIndex,
+                theronCorrectAnswers: nextCorrect,
+                theronRollRequired: isFinalQuestion,
+            },
+            timelineReason: isCorrect ? 'theron_answer_correct' : 'theron_answer_wrong',
+        });
+        if (!advanced) return res.status(500).json({ error: 'Failed to persist Theron answer' });
+
+        await insertQuestHistory({
+            quest_id: questId,
+            player_action: `theron_answer_${qIndex + 1}:${answerId}`,
+            ai_narrative: isCorrect ? 'Theron gives a brief approving nod.' : 'Theron narrows his eyes at the answer.',
+            engine_trigger: isCorrect ? 'theron_answer_correct' : 'theron_answer_wrong',
+            on_chain_event: false,
+        });
+
+        const updated = await getQuestById(questId);
+        return res.json({
+            success: true,
+            questId,
+            flow: readQuestFlow(updated),
+            isCorrect,
+            nextQuestion: isFinalQuestion ? null : THERON_QUESTIONS[nextIndex],
+            theronLine: isFinalQuestion
+                ? 'Good. Now prove your nerve. Roll a d20. Beat 5 and the watch sigil is yours.'
+                : 'Next question.',
+        });
+    } catch (error: any) {
+        return res.status(500).json({ error: 'Failed to submit Theron answer', details: error.message });
+    }
+});
+
+app.post('/api/quest/theron/submit-d20', async (req, res) => {
+    try {
+        const questId = String(req.body?.questId || '').trim();
+        const playerId = String(req.body?.playerId || '').trim();
+        const d20Roll = Number(req.body?.d20Roll);
+        if (!questId || !playerId || !Number.isFinite(d20Roll)) {
+            return res.status(400).json({ error: 'questId, playerId and d20Roll are required' });
+        }
+
+        const quest = await getQuestById(questId);
+        if (!quest) return res.status(404).json({ error: 'Quest not found' });
+        if (!Array.isArray(quest.party_members) || !quest.party_members.includes(playerId)) {
+            return res.status(403).json({ error: 'Player is not part of this quest' });
+        }
+        const flow = readQuestFlow(quest);
+        if (!flow) return res.status(409).json({ error: 'Quest flow is missing' });
+        if (getQuestLine(flow) !== 'theron') return res.status(409).json({ error: 'Quest is not owned by Guard Theron' });
+        if (isQuestCompletedState(flow.state)) return res.status(409).json({ error: 'Quest already completed' });
+
+        const metadata = (flow.metadata && typeof flow.metadata === 'object') ? flow.metadata : {};
+        const correctAnswers = Number(metadata.theronCorrectAnswers || 0);
+        const passed = correctAnswers >= 2 && d20Roll > 5;
+        const rewardDraft = passed ? buildTheronRewardDraft(questId, d20Roll) : null;
+
+        const advanced = await updateQuestFlowState(questId, {
+            state: passed ? 'COMPLETED_SUCCESS' : 'COMPLETED_FAIL',
+            branch: passed ? 'success' : 'fail',
+            combatOutcome: passed ? 'success' : 'fail',
+            rewardResolution: {
+                gmRoll: d20Roll,
+                nftAwarded: passed,
+                rewardReason: passed ? 'gm_roll_passed' : 'gm_roll_failed',
+            },
+            rewardDraft,
+            metadata: {
+                theronRollRequired: false,
+                theronRollResult: d20Roll,
+            },
+            timelineReason: passed ? 'theron_roll_passed' : 'theron_roll_failed',
+        });
+        if (!advanced) return res.status(500).json({ error: 'Failed to persist Theron d20 result' });
+
+        const updated = await getQuestById(questId);
+        const finalizedFlow = readQuestFlow(updated);
+        const finished = await finishQuest(
+            questId,
+            passed ? 'Success' : 'PartyWiped',
+            passed,
+            updated?.stat_changes || quest.stat_changes || {},
+        );
+        if (!finished) return res.status(500).json({ error: 'Failed to finalize Theron quest' });
+
+        await insertQuestHistory({
+            quest_id: questId,
+            player_action: `theron_d20_roll:${d20Roll}`,
+            player_roll: d20Roll,
+            ai_narrative: passed
+                ? 'Theron marks the roll and grants a watch-sealed relic right.'
+                : 'Theron dismisses the attempt. The watch sigil remains locked.',
+            engine_trigger: passed ? 'theron_success' : 'theron_fail',
+            on_chain_event: passed,
+        });
+
+        return res.json({
+            success: true,
+            questId,
+            d20Roll,
+            nftAwarded: passed,
+            rewardDraft,
+            flow: finalizedFlow,
+            theronLine: passed
+                ? 'Discipline and nerve. You earned the watch sigil.'
+                : 'Not enough. Return when your hand is steadier.',
+        });
+    } catch (error: any) {
+        return res.status(500).json({ error: 'Failed to submit Theron d20', details: error.message });
+    }
+});
+
 
 app.get('/api/quest/list', async (req, res) => {
     try {
@@ -1663,6 +2102,17 @@ app.get('/api/quest/:id/history', async (req, res) => {
         res.json({ success: true, history });
     } catch (error: any) {
         res.status(500).json({ error: 'Failed to fetch quest history', details: error.message });
+    }
+});
+
+app.get('/api/quest/:id/reward-tx', async (req, res) => {
+    try {
+        const questId = String(req.params.id || '').trim();
+        if (!questId) return res.status(400).json({ error: 'quest id is required' });
+        const rewards = await getQuestRewardTransactions(questId);
+        res.json({ success: true, rewards });
+    } catch (error: any) {
+        res.status(500).json({ error: 'Failed to fetch quest reward transactions', details: error.message });
     }
 });
 

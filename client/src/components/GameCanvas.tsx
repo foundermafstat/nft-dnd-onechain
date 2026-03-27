@@ -42,6 +42,8 @@ import { SERVER_URL } from '@/lib/config';
 
 const TILE_SIZE = 36;
 const DEFAULT_LOCATION_ID = '00000000-0000-4000-a000-000000000001';
+const TAVERN_LOCATION_ID = '00000000-0000-4000-a000-000000000001';
+const TAVERN_CELLAR_LOCATION_ID = '00000000-0000-4000-a000-000000000010';
 const WALK_STEP_MS = 150; // Milliseconds per tile step
 
 export default function GameCanvas({ playerId }: GameCanvasProps) {
@@ -93,6 +95,58 @@ export default function GameCanvas({ playerId }: GameCanvasProps) {
     // Keep refs in sync
     useEffect(() => { npcsRef.current = npcs; }, [npcs]);
     useEffect(() => { myPosRef.current = myPos; }, [myPos]);
+
+    useEffect(() => {
+        setLocationMap((prev) => {
+            if (!prev || prev.id !== TAVERN_LOCATION_ID) return prev;
+            const exits = Array.isArray(prev.exits) ? prev.exits : [];
+            const hasCellarExit = exits.some((exit) =>
+                exit.target_location_id === TAVERN_CELLAR_LOCATION_ID &&
+                exit.tile_x === 17 &&
+                exit.tile_y === 2,
+            );
+
+            const shouldShowCellarExit = !!(
+                questFlow?.questLine === 'aldric' &&
+                (
+                    questFlow.state === 'COMBAT_REQUIRED' ||
+                    questFlow.state === 'ADVENTURE_ACTIVE' ||
+                    questFlow.state === 'RETURN_TO_ALDRIC' ||
+                    (questFlow as any)?.metadata?.cellarEntranceEnabled === true
+                )
+            );
+
+            if (shouldShowCellarExit && !hasCellarExit) {
+                return {
+                    ...prev,
+                    exits: [
+                        ...exits,
+                        {
+                            tile_x: 17,
+                            tile_y: 2,
+                            target_location_id: TAVERN_CELLAR_LOCATION_ID,
+                            target_location_name: 'Tavern Cellar',
+                            spawn_label: 'from_tavern',
+                            edge: 'north',
+                        },
+                    ],
+                };
+            }
+
+            if (!shouldShowCellarExit && hasCellarExit) {
+                return {
+                    ...prev,
+                    exits: exits.filter((exit) => !(
+                        exit.target_location_id === TAVERN_CELLAR_LOCATION_ID &&
+                        exit.tile_x === 17 &&
+                        exit.tile_y === 2
+                    )),
+                };
+            }
+
+            return prev;
+        });
+    }, [questFlow?.questLine, questFlow?.state]);
 
     // ── Parse location from API ────────────────────────────────────────
     function parseLocationFromAPI(loc: any): LocationMap {
@@ -508,6 +562,8 @@ export default function GameCanvas({ playerId }: GameCanvasProps) {
         const W = TileType.Wall, F = TileType.Floor, D = TileType.Door;
         const FP = TileType.Fireplace, TB = TileType.Table, CH = TileType.Chair;
         const BA = TileType.Bar, BR = TileType.Barrel, RG = TileType.Rug, V = TileType.Void;
+        setNpcs([]);
+        setHoveredEntity(null);
         setLocationMap({
             id: 'fallback', name: 'Tavern', biome_type: 'HubRegion', room_type: 'SafeZone',
             width: 12, height: 10, threat_level: 0, spawn_points: [{ x: 5, y: 8 }], exits: [],

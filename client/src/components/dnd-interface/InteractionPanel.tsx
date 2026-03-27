@@ -7,14 +7,19 @@ import { Backpack, Users, Send, User, Sparkles, Dices, X, Bot } from 'lucide-rea
 import DraggableItem from './DraggableItem';
 import { DiceType } from '@/components/DiceOverlay';
 import { SERVER_URL } from '@/lib/config';
-import { endGame, mintInventoryNFTFromPrepay, startGame } from '@/lib/OneChain';
+import { endGame, mintInventoryNFT, mintInventoryNFTFromPrepay, startGame } from '@/lib/OneChain';
+import { buildTxExplorerUrl } from '@/lib/onechainExplorer';
 import { useAuth } from '@/context/AuthContext';
 import { useOnechainWalletExecutor } from '@/hooks/useOnechainWalletExecutor';
 import {
     acceptAldricQuestAndPrepay,
     acceptMartaQuestAndPrepay,
+    declineQuestOffer,
+    startDialogWithTheron,
     startDialogWithAldric,
     startDialogWithMarta,
+    submitTheronAnswer,
+    submitTheronD20,
     submitMartaCombatResult,
     turnInAldricQuest,
     turnInMartaQuest
@@ -25,13 +30,34 @@ interface InteractionPanelProps {
 	triggerRoll: (type: DiceType) => void;
 }
 
+const THERON_QUESTIONS = [
+    {
+        id: 'theron_q1',
+        prompt: 'A thief runs into the chapel during curfew. What does a loyal guard do first?',
+        options: [
+            { id: 'q1_a', label: 'Secure civilians and call for backup.' },
+            { id: 'q1_b', label: 'Ignore protocol and chase alone.' },
+            { id: 'q1_c', label: 'Take a bribe and look away.' },
+        ],
+    },
+    {
+        id: 'theron_q2',
+        prompt: 'At the castle gate, undead are spotted at dusk. What is the right command?',
+        options: [
+            { id: 'q2_a', label: 'Open the gate to lure them in.' },
+            { id: 'q2_b', label: 'Hold formation and signal Sergeant Bryn.' },
+            { id: 'q2_c', label: 'Drop weapons and run.' },
+        ],
+    },
+] as const;
+
 function getMessageTone(senderType: ChatMessage['senderType']) {
 	if (senderType === 'player') {
-		return 'border-white/7 bg-[linear-gradient(180deg,rgba(27,27,30,0.96),rgba(18,18,20,0.96))] text-stone-100 rounded-br-lg';
+		return 'border-white/7 bg-[linear-gradient(180deg,rgba(27,27,30,0.96),rgba(18,18,20,0.96))] text-stone-100 rounded-tr-lg';
 	}
 
 	if (senderType === 'dm') {
-		return 'border-amber-400/14 bg-[linear-gradient(180deg,rgba(64,48,24,0.30),rgba(20,18,15,0.96))] text-[#f2e7c7] rounded-bl-lg shadow-[0_16px_28px_rgba(0,0,0,0.28),inset_0_1px_0_rgba(255,255,255,0.04)]';
+		return 'border-amber-400/14 bg-[linear-gradient(180deg,rgba(64,48,24,0.30),rgba(20,18,15,0.96))] text-[#f2e7c7] rounded-tl-lg shadow-[0_16px_28px_rgba(0,0,0,0.28),inset_0_1px_0_rgba(255,255,255,0.04)]';
 	}
 
 	if (senderType === 'system') {
@@ -45,6 +71,8 @@ export default function InteractionPanel({ triggerRoll }: InteractionPanelProps)
 	const {
 		chatMessages,
 		addMessage,
+        removeMessage,
+        removeQuestOfferMessagesForNpc,
 		currentTurn,
 		activeNpc,
 		setActiveNpc,
@@ -58,6 +86,9 @@ export default function InteractionPanel({ triggerRoll }: InteractionPanelProps)
         questFlow,
         setQuestFlow,
         playerCharacter,
+        lastDiceRoll,
+        pendingDiceRequest,
+        setPendingDiceRequest,
 	} = useGameState();
 	const { walletAddress, playerId } = useAuth();
 	const { executor } = useOnechainWalletExecutor();
@@ -65,6 +96,7 @@ export default function InteractionPanel({ triggerRoll }: InteractionPanelProps)
 	const [isSendingDialog, setIsSendingDialog] = useState(false);
 	const [activeMenu, setActiveMenu] = useState<'inventory' | 'party' | 'playerInfo' | 'skills' | 'dice' | null>(null);
 	const scrollRef = useRef<HTMLDivElement>(null);
+    const processedTheronRollAtRef = useRef<number | null>(null);
 
 	// Chat is a dropzone for using items from inventory
 	const { setNodeRef: setChatDropRef, isOver: isChatOver } = useDroppable({
@@ -99,16 +131,16 @@ export default function InteractionPanel({ triggerRoll }: InteractionPanelProps)
 	}, [chatMessages, activeMenu]);
 
     const mapServerStateToLocal = (state: string) => {
-        if (state === 'OFFERED_BY_MARTA' || state === 'OFFERED_BY_ALDRIC') return 'offered_by_marta' as const;
-        if (state === 'COMBAT_REQUIRED' || state === 'ADVENTURE_ACTIVE' || state === 'ACCEPTED') return 'combat_required' as const;
-        if (state === 'RETURN_TO_MARTA' || state === 'RETURN_TO_ALDRIC') return 'return_to_marta' as const;
+        if (state === 'OFFERED_BY_MARTA' || state === 'OFFERED_BY_ALDRIC' || state === 'OFFERED_BY_THERON' || state === 'THERON_Q1' || state === 'THERON_Q2') return 'offered_by_marta' as const;
+        if (state === 'COMBAT_REQUIRED' || state === 'ADVENTURE_ACTIVE' || state === 'ACCEPTED' || state === 'THERON_ROLL_REQUIRED') return 'combat_required' as const;
+        if (state === 'RETURN_TO_MARTA' || state === 'RETURN_TO_ALDRIC' || state === 'RETURN_TO_THERON') return 'return_to_marta' as const;
         if (state === 'COMPLETED_SUCCESS') return 'completed_success' as const;
         if (state === 'COMPLETED_FAIL') return 'completed_fail' as const;
         return 'not_started' as const;
     };
 
     const isAcceptIntent = (text: string) =>
-        /(accept|start|yes|agree|begin|take the quest|quest please|get quest|give me a quest|give quest|ready|let'?s go|lets go|беру|принимаю|да|начать|дай квест|возьми квест|готов)/i.test(text);
+        /(accept|start|yes|agree|begin|take the quest|quest please|get quest|give me a quest|give quest|ready|let'?s go|lets go|help with the rats|i will help|i help you|беру|принимаю|да|начать|дай квест|возьми квест|готов|помогу|я помогу)/i.test(text);
     const isTurnInIntent = (text: string) =>
         /(turn in|report|return|complete|finish|i'm back|im back|back from battle|сдать|вернулся|готово|завершить|я вернулся|закрыть квест)/i.test(text);
     const isVictoryIntent = (text: string) =>
@@ -116,9 +148,13 @@ export default function InteractionPanel({ triggerRoll }: InteractionPanelProps)
     const isDefeatIntent = (text: string) =>
         /(report defeat|defeat|lost|i lost|поражение|проиграл|проигрыш)/i.test(text);
     const isDeclineIntent = (text: string) =>
-        /(decline|no|not now|later|отказ|нет|не сейчас|позже)/i.test(text);
+        /(decline|decline quest|abandon|abandon quest|cancel quest|no|not now|later|отказ|нет|не сейчас|позже|отменить квест|бросить квест)/i.test(text);
 
     const addQuestPrompt = (npcName: string, content: string, quickReplies: Array<{ label: string; payload: string }>) => {
+        const labels = quickReplies.map((reply) => reply.label.trim().toLowerCase());
+        if (labels.includes('agree') && labels.includes('decline')) {
+            removeQuestOfferMessagesForNpc(npcName);
+        }
         addMessage({
             sender: npcName,
             senderType: 'dm',
@@ -126,6 +162,129 @@ export default function InteractionPanel({ triggerRoll }: InteractionPanelProps)
             quickReplies,
         });
     };
+
+    const addTheronQuestionPrompt = (
+        prompt: string,
+        options: Array<{ id: string; label: string }>,
+    ) => {
+        addQuestPrompt(
+            'Guard Theron',
+            prompt,
+            options.map((option) => ({
+                label: option.label,
+                payload: `theron:answer:${option.id}`,
+            })),
+        );
+    };
+
+    useEffect(() => {
+        if (activeNpc?.name !== 'Old Marta') {
+            removeQuestOfferMessagesForNpc('Old Marta');
+        }
+    }, [activeNpc, removeQuestOfferMessagesForNpc]);
+
+    useEffect(() => {
+        const shouldHandleTheronRoll = !!(
+            lastDiceRoll &&
+            lastDiceRoll.type === 'd20' &&
+            questFlow?.questLine === 'theron' &&
+            questFlow.state === 'THERON_ROLL_REQUIRED' &&
+            activeQuestId &&
+            playerId
+        );
+        if (!shouldHandleTheronRoll || !lastDiceRoll) return;
+        if (processedTheronRollAtRef.current === lastDiceRoll.at) return;
+        processedTheronRollAtRef.current = lastDiceRoll.at;
+
+        void (async () => {
+            try {
+                const outcome = await submitTheronD20({
+                    questId: activeQuestId!,
+                    playerId: playerId!,
+                    d20Roll: lastDiceRoll.value,
+                });
+
+                if (outcome.flow) {
+                    setQuestFlow(outcome.flow);
+                    setTestQuestState(mapServerStateToLocal(outcome.flow.state));
+                }
+                setPendingDiceRequest(null);
+
+                addMessage({
+                    sender: 'Guard Theron',
+                    senderType: 'dm',
+                    content: outcome.theronLine || (outcome.nftAwarded
+                        ? 'You passed the watch trial.'
+                        : 'Trial failed. Return when you are ready.'),
+                });
+
+                if (outcome.nftAwarded && outcome.rewardDraft) {
+                    if (!walletAddress || !executor) {
+                        addMessage({
+                            sender: 'System',
+                            senderType: 'system',
+                            content: 'Theron reward unlocked, but wallet signer is missing. Reconnect to mint.',
+                        });
+                        return;
+                    }
+
+                    const minted = await mintInventoryNFT({
+                        playerAddress: walletAddress,
+                        name: outcome.rewardDraft.name,
+                        rarityTier: outcome.rewardDraft.rarityTier,
+                        metadataCid: outcome.rewardDraft.metadataCid,
+                        loreCid: outcome.rewardDraft.loreCid,
+                    }, executor);
+
+                    addMessage({
+                        sender: 'System',
+                        senderType: 'system',
+                        content: minted.success
+                            ? `Theron reward minted${minted.objectId ? ` (${minted.objectId.slice(0, 14)}...)` : ''}.`
+                            : `[MINT ERROR] ${minted.error || 'Failed to mint Theron reward NFT.'}`,
+                        txHash: minted.success ? (minted.hash || null) : undefined,
+                        txUrl: minted.success ? buildTxExplorerUrl(minted.hash || null) || undefined : undefined,
+                    });
+
+                    if (minted.success && playerCharacter?.id) {
+                        await fetch(`${SERVER_URL}/api/character/${playerCharacter.id}/inventory/add-custom`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                questId: activeQuestId,
+                                name: outcome.rewardDraft.name,
+                                rarityTier: outcome.rewardDraft.rarityTier,
+                                metadataCid: outcome.rewardDraft.metadataCid,
+                                loreCid: outcome.rewardDraft.loreCid,
+                                onechainTokenId: minted.objectId || '',
+                                txHash: minted.hash || '',
+                            }),
+                        });
+                    }
+                }
+            } catch (err: any) {
+                setPendingDiceRequest(null);
+                addMessage({
+                    sender: 'System',
+                    senderType: 'system',
+                    content: err?.message || 'Failed to resolve Theron d20 roll.',
+                });
+            }
+        })();
+    }, [
+        activeQuestId,
+        addMessage,
+        executor,
+        lastDiceRoll,
+        playerId,
+        questFlow?.questLine,
+        questFlow?.state,
+        setPendingDiceRequest,
+        setQuestFlow,
+        setTestQuestState,
+        walletAddress,
+        playerCharacter?.id,
+    ]);
 
 	const handleSend = async (overrideText?: string) => {
         const resolved = (overrideText ?? inputText).trim();
@@ -138,28 +297,79 @@ export default function InteractionPanel({ triggerRoll }: InteractionPanelProps)
 
 		if (activeNpc) {
 			// NPC Conversation Mode
-			addMessage({ sender: 'Player', senderType: 'player', content: textToRoute });
+            if (textToRoute.startsWith('theron:answer:')) {
+                addMessage({ sender: 'Player', senderType: 'player', content: 'I choose this answer.' });
+            } else if (textToRoute === 'theron:roll:d20') {
+                addMessage({ sender: 'Player', senderType: 'player', content: 'Rolling d20 for the watch trial.' });
+            } else {
+			    addMessage({ sender: 'Player', senderType: 'player', content: textToRoute });
+            }
 
-            if (activeNpc.name === 'Old Marta' || activeNpc.name === 'Grim Aldric') {
+            if (activeNpc.name === 'Old Marta' || activeNpc.name === 'Grim Aldric' || activeNpc.name === 'Guard Theron') {
                 try {
                     if (!playerId) {
                         addMessage({ sender: 'System', senderType: 'system', content: 'Player identity is missing.' });
                         return;
                     }
-                    const questLine = activeNpc.name === 'Old Marta' ? 'marta' : 'aldric';
+                    const questLine = activeNpc.name === 'Old Marta' ? 'marta' : activeNpc.name === 'Grim Aldric' ? 'aldric' : 'theron';
+
+                    // Allow cancelling an already-active quest from another quest giver
+                    // before attempting to start a new dialog flow.
+                    if (
+                        isDeclineIntent(textToRoute) &&
+                        activeQuestId &&
+                        questFlow &&
+                        questFlow.questLine !== questLine &&
+                        questFlow.state !== 'COMPLETED_SUCCESS' &&
+                        questFlow.state !== 'COMPLETED_FAIL'
+                    ) {
+                        await declineQuestOffer({ questId: activeQuestId, playerId });
+                        setActiveQuestId(null);
+                        setQuestFlow(null);
+                        setTestQuestSessionId(null);
+                        setTestQuestState('not_started');
+                        setPendingDiceRequest(null);
+                        addMessage({
+                            sender: 'System',
+                            senderType: 'system',
+                            content: 'Previous oath cancelled. You can request a new quest now.',
+                        });
+                        return;
+                    }
 
                     // Start/refresh the offer
                     if (testQuestState === 'not_started' || !activeQuestId || !questFlow || questFlow.questLine !== questLine) {
                         const offer = questLine === 'marta'
                             ? await startDialogWithMarta({ playerId })
-                            : await startDialogWithAldric({ playerId });
+                            : questLine === 'aldric'
+                                ? await startDialogWithAldric({ playerId })
+                                : await startDialogWithTheron({ playerId });
                         if (offer.questId) setActiveQuestId(offer.questId);
                         if (offer.flow) {
                             setQuestFlow(offer.flow);
                             setTestQuestState(mapServerStateToLocal(offer.flow.state));
                             if (offer.flow.sessionId) setTestQuestSessionId(offer.flow.sessionId);
                         }
-                        if (questLine === 'marta') {
+                        const blockedByAnotherQuest = !!offer.flow && offer.flow.questLine !== questLine;
+                        if (blockedByAnotherQuest) {
+                            addMessage({
+                                sender: activeNpc.name,
+                                senderType: 'dm',
+                                content: offer.theronLine || offer.aldricLine || offer.martaLine || 'Another oath still binds you. End it before taking a new prophecy.',
+                            });
+                            return;
+                        }
+                        if (questLine === 'theron') {
+                            if (offer.question) {
+                                addTheronQuestionPrompt(offer.question.prompt, offer.question.options);
+                            } else {
+                                addMessage({
+                                    sender: 'Guard Theron',
+                                    senderType: 'dm',
+                                    content: offer.theronLine || 'Answer my two questions, then roll d20.',
+                                });
+                            }
+                        } else if (questLine === 'marta') {
                             addQuestPrompt(
                                 'Old Marta',
                                 offer.martaLine || 'The bones told me you would come...',
@@ -173,7 +383,7 @@ export default function InteractionPanel({ triggerRoll }: InteractionPanelProps)
                                 'Grim Aldric',
                                 offer.aldricLine || offer.martaLine || 'Rats are eating all my cellar stock. Can you handle them?',
                                 [
-                                    { label: 'Agree', payload: 'i will help with the rats' },
+                                    { label: 'Agree', payload: 'agree' },
                                     { label: 'Decline', payload: 'not now' },
                                 ],
                             );
@@ -181,7 +391,108 @@ export default function InteractionPanel({ triggerRoll }: InteractionPanelProps)
                         return;
                     }
 
+                    if (questLine === 'theron') {
+                        if (isDeclineIntent(textToRoute)) {
+                            if (activeQuestId) {
+                                await declineQuestOffer({ questId: activeQuestId, playerId });
+                                setActiveQuestId(null);
+                                setQuestFlow(null);
+                                setTestQuestSessionId(null);
+                                setTestQuestState('not_started');
+                                setPendingDiceRequest(null);
+                            }
+                            addMessage({
+                                sender: 'Guard Theron',
+                                senderType: 'dm',
+                                content: 'Trial withdrawn. Return when you want another attempt.',
+                            });
+                            return;
+                        }
+
+                        if (textToRoute === 'theron:roll:d20') {
+                            setPendingDiceRequest('d20');
+                            setActiveMenu('dice');
+                            addMessage({
+                                sender: 'System',
+                                senderType: 'system',
+                                content: 'Open Dice panel and roll d20 to resolve Theron trial.',
+                            });
+                            return;
+                        }
+
+                        if (textToRoute.startsWith('theron:answer:')) {
+                            const answerId = textToRoute.replace('theron:answer:', '').trim();
+                            if (!activeQuestId) {
+                                addMessage({
+                                    sender: 'System',
+                                    senderType: 'system',
+                                    content: 'Theron quest id is missing. Start dialog again.',
+                                });
+                                return;
+                            }
+                            const result = await submitTheronAnswer({
+                                questId: activeQuestId,
+                                playerId,
+                                answerId,
+                            });
+                            if (result.flow) {
+                                setQuestFlow(result.flow);
+                                setTestQuestState(mapServerStateToLocal(result.flow.state));
+                            }
+                            if (result.nextQuestion) {
+                                addTheronQuestionPrompt(result.nextQuestion.prompt, result.nextQuestion.options);
+                            } else {
+                                setPendingDiceRequest('d20');
+                                setActiveMenu('dice');
+                                addQuestPrompt(
+                                    'Guard Theron',
+                                    result.theronLine || 'Open Dice panel, then roll d20. You need more than 5.',
+                                    [{ label: 'Roll d20', payload: 'theron:roll:d20' }],
+                                );
+                            }
+                            return;
+                        }
+
+                        if (questFlow.state === 'THERON_ROLL_REQUIRED') {
+                            setPendingDiceRequest('d20');
+                            setActiveMenu('dice');
+                            addQuestPrompt(
+                                'Guard Theron',
+                                'The watch waits. Open Dice panel and roll d20. Beat 5.',
+                                [{ label: 'Roll d20', payload: 'theron:roll:d20' }],
+                            );
+                            return;
+                        }
+
+                        if (questFlow.state === 'OFFERED_BY_THERON' || questFlow.state === 'THERON_Q1' || questFlow.state === 'THERON_Q2') {
+                            const qIndexRaw = Number((questFlow.metadata as any)?.theronQuestionIndex || 0);
+                            const qIndex = Math.max(0, Math.min(THERON_QUESTIONS.length - 1, qIndexRaw));
+                            const question = THERON_QUESTIONS[qIndex];
+                            addTheronQuestionPrompt(question.prompt, question.options as Array<{ id: string; label: string }>);
+                            return;
+                        }
+
+                        addMessage({
+                            sender: 'Guard Theron',
+                            senderType: 'dm',
+                            content: 'Stay sharp. Use the offered replies to continue the trial.',
+                        });
+                        return;
+                    }
+
                     if (isDeclineIntent(textToRoute)) {
+                        const hasInProgressQuest = !!(
+                            activeQuestId &&
+                            questFlow &&
+                            (questFlow.state !== 'COMPLETED_SUCCESS' && questFlow.state !== 'COMPLETED_FAIL')
+                        );
+                        if (hasInProgressQuest && activeQuestId) {
+                            await declineQuestOffer({ questId: activeQuestId, playerId });
+                            setActiveQuestId(null);
+                            setQuestFlow(null);
+                            setTestQuestSessionId(null);
+                            setTestQuestState('not_started');
+                        }
                         addMessage({
                             sender: activeNpc.name,
                             senderType: 'dm',
@@ -260,10 +571,19 @@ export default function InteractionPanel({ triggerRoll }: InteractionPanelProps)
                             aiRollsCount: 64,
                         });
                         if (!prepay.success || !prepay.sessionId || !activeQuestId) {
+                            const prepayError = (prepay.error || '').toLowerCase();
+                            const isUserCancelled =
+                                prepayError.includes('user rejected') ||
+                                prepayError.includes('rejected the request') ||
+                                prepayError.includes('request rejected') ||
+                                prepayError.includes('cancelled') ||
+                                prepayError.includes('canceled');
                             addMessage({
                                 sender: 'System',
                                 senderType: 'system',
-                                content: `[PREPAY ERROR] ${prepay.error || 'Failed to activate adventure.'}`,
+                                content: isUserCancelled
+                                    ? 'Adventure activation cancelled.'
+                                    : `[PREPAY ERROR] ${prepay.error || 'Failed to activate adventure.'}`,
                             });
                             return;
                         }
@@ -477,12 +797,25 @@ export default function InteractionPanel({ triggerRoll }: InteractionPanelProps)
 
 								<div className={`max-w-[88%] break-words rounded-[1.25rem] border px-4 py-3 text-[0.82rem] leading-[1.6] shadow-[0_10px_22px_rgba(0,0,0,0.16)] ${getMessageTone(msg.senderType)}`}>
 									<div>{msg.content}</div>
+                                    {msg.txUrl && (
+                                        <a
+                                            href={msg.txUrl}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="mt-2 inline-block text-[0.72rem] uppercase tracking-[0.16em] text-amber-300 underline underline-offset-4 hover:text-amber-100"
+                                        >
+                                            View Transaction
+                                        </a>
+                                    )}
                                     {Array.isArray(msg.quickReplies) && msg.quickReplies.length > 0 && (
                                         <div className="mt-3 flex flex-wrap gap-2">
                                             {msg.quickReplies.map((reply, idx) => (
                                                 <button
                                                     key={`${msg.id}-reply-${idx}`}
-                                                    onClick={() => handleSend(reply.payload)}
+                                                    onClick={() => {
+                                                        removeMessage(msg.id);
+                                                        handleSend(reply.payload);
+                                                    }}
                                                     disabled={isSendingDialog}
                                                     className="rounded-xl border border-amber-400/35 bg-amber-400/[0.08] px-3 py-1.5 text-[0.62rem] font-inter font-semibold uppercase tracking-[0.14em] text-amber-100 transition hover:border-amber-200/55 hover:bg-amber-400/[0.16] disabled:opacity-50"
                                                 >
@@ -537,7 +870,7 @@ export default function InteractionPanel({ triggerRoll }: InteractionPanelProps)
 						<Button
 							variant="outline"
 							size="sm"
-							className={`h-10 rounded-xl border px-4 transition-all duration-300 ${activeMenu === 'dice' ? 'border-amber-400/34 bg-amber-400/[0.09] text-amber-200 shadow-[inset_0_0_18px_rgba(245,158,11,0.1)]' : 'border-transparent bg-transparent text-stone-400 hover:bg-white/[0.04] hover:text-amber-100'}`}
+							className={`h-10 rounded-xl border px-4 transition-all duration-300 ${activeMenu === 'dice' ? 'border-amber-400/34 bg-amber-400/[0.09] text-amber-200 shadow-[inset_0_0_18px_rgba(245,158,11,0.1)]' : pendingDiceRequest === 'd20' ? 'border-amber-200 bg-amber-500/[0.14] text-amber-100 shadow-[0_0_18px_rgba(245,158,11,0.28)] animate-pulse' : 'border-transparent bg-transparent text-stone-400 hover:bg-white/[0.04] hover:text-amber-100'}`}
 							onClick={() => setActiveMenu(activeMenu === 'dice' ? null : 'dice')}
 							title="Roll Dice"
 						>
@@ -816,6 +1149,7 @@ function SkillsMenu() {
 }
 
 function DiceMenu({ triggerRoll }: { triggerRoll: (t: DiceType) => void; }) {
+    const { pendingDiceRequest } = useGameState();
 	return (
 		<div className="p-6">
 			<h4 className="mb-4 text-center font-cinzel text-[0.74rem] font-semibold uppercase tracking-[0.3em] text-stone-400">Cast the Bones</h4>
@@ -826,7 +1160,9 @@ function DiceMenu({ triggerRoll }: { triggerRoll: (t: DiceType) => void; }) {
 						onClick={() => triggerRoll(d as DiceType)}
 						className={`rounded-[20px] border py-4 text-[0.96rem] font-cinzel font-semibold uppercase tracking-[0.16em] transition-all duration-300 group
                             ${d === 'd20'
-								? 'border-amber-400/34 bg-[linear-gradient(180deg,rgba(93,61,22,0.42),rgba(19,18,16,0.96))] text-amber-200 hover:border-amber-300 hover:shadow-[0_0_20px_rgba(245,158,11,0.18)] hover:-translate-y-1'
+								? `${pendingDiceRequest === 'd20'
+                                    ? 'border-amber-200 bg-[linear-gradient(180deg,rgba(130,90,30,0.58),rgba(35,27,18,0.96))] text-amber-100 shadow-[0_0_26px_rgba(245,158,11,0.38)] animate-pulse'
+                                    : 'border-amber-400/34 bg-[linear-gradient(180deg,rgba(93,61,22,0.42),rgba(19,18,16,0.96))] text-amber-200 hover:border-amber-300 hover:shadow-[0_0_20px_rgba(245,158,11,0.18)]'} hover:-translate-y-1`
 								: 'border-white/7 bg-[linear-gradient(180deg,rgba(18,18,21,0.96),rgba(11,11,13,0.96))] text-stone-400 hover:border-white/14 hover:text-amber-100 hover:-translate-y-0.5'}`}
 					>
 						<span className="group-hover:scale-110 transition-transform block">{d}</span>

@@ -1,8 +1,9 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { useCurrentAccount, useCurrentWallet, useDisconnectWallet } from '@mysten/dapp-kit';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
+import { useCurrentAccount, useCurrentWallet, useDisconnectWallet } from '@onelabs/dapp-kit';
 import { SERVER_URL } from '@/lib/config';
+import { useGameState } from '@/store/useGameState';
 
 interface AuthContextType {
     playerId: string | null;
@@ -30,6 +31,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const [playerId, setPlayerIdState] = useState<string | null>(null);
     const [walletAddress, setWalletAddressState] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(true);
+    const lastSessionKeyRef = useRef<string | null>(null);
 
     useEffect(() => {
         try {
@@ -110,6 +112,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             cancelled = true;
         };
     }, [account, currentWallet, isLoading, setAuth]);
+
+    useEffect(() => {
+        if (isLoading) return;
+        const currentSessionKey = `${playerId || 'anonymous'}::${walletAddress || 'no-wallet'}`;
+        if (lastSessionKeyRef.current === null) {
+            lastSessionKeyRef.current = currentSessionKey;
+            return;
+        }
+        if (lastSessionKeyRef.current !== currentSessionKey) {
+            useGameState.getState().resetForAuthSession();
+            lastSessionKeyRef.current = currentSessionKey;
+        }
+    }, [isLoading, playerId, walletAddress]);
 
     return (
         <AuthContext.Provider value={{ playerId, walletAddress, setAuth, logout, isLoading }}>

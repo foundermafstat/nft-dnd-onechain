@@ -10,28 +10,38 @@ export const MARTA_REWARD_FAIL = {
     lore: 1,
 } as const;
 
-export type QuestLine = 'marta' | 'aldric';
+export type QuestLine = 'marta' | 'aldric' | 'theron';
 
 export type QuestState =
     | 'NEW'
     | 'OFFERED_BY_MARTA'
     | 'OFFERED_BY_ALDRIC'
+    | 'OFFERED_BY_THERON'
     | 'ACCEPTED'
     | 'ADVENTURE_ACTIVE'
     | 'COMBAT_REQUIRED'
+    | 'THERON_Q1'
+    | 'THERON_Q2'
+    | 'THERON_ROLL_REQUIRED'
     | 'RETURN_TO_MARTA'
     | 'RETURN_TO_ALDRIC'
+    | 'RETURN_TO_THERON'
     | 'COMPLETED_SUCCESS'
     | 'COMPLETED_FAIL';
 
 export type QuestStep =
     | 'talk_to_marta'
     | 'talk_to_aldric'
+    | 'talk_to_theron'
     | 'accept_and_prepay'
     | 'complete_adventure'
     | 'combat_mandatory'
+    | 'answer_theron_q1'
+    | 'answer_theron_q2'
+    | 'roll_d20'
     | 'return_to_marta'
     | 'return_to_aldric'
+    | 'return_to_theron'
     | 'turn_in';
 
 export type QuestBranch = 'pending' | 'success' | 'fail';

@@ -27,6 +27,17 @@ export interface Quest {
     created_at: string;
 }
 
+export interface QuestRewardTx {
+    item_id: string;
+    item_name: string;
+    tx_hash: string;
+    onechain_token_id: string | null;
+    metadata_cid?: string;
+    lore_cid?: string;
+    image_url?: string;
+    created_at?: string;
+}
+
 export async function fetchQuests(): Promise<Quest[]> {
     const res = await fetch(`${SERVER_URL}/api/quest/list`);
     const data = await res.json();
@@ -43,4 +54,10 @@ export async function fetchQuestHistory(questId: string): Promise<QuestHistoryEn
     const res = await fetch(`${SERVER_URL}/api/quest/${questId}/history`);
     const data = await res.json();
     return data.history || [];
+}
+
+export async function fetchQuestRewardTx(questId: string): Promise<QuestRewardTx[]> {
+    const res = await fetch(`${SERVER_URL}/api/quest/${questId}/reward-tx`);
+    const data = await res.json();
+    return data.rewards || [];
 }

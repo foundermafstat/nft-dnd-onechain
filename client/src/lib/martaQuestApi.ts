@@ -14,6 +14,12 @@ export interface StartDialogResponse extends MartaQuestBaseResponse {
     flow?: MartaQuestFlow;
     martaLine?: string;
     aldricLine?: string;
+    theronLine?: string;
+    question?: {
+        id: string;
+        prompt: string;
+        options: Array<{ id: string; label: string }>;
+    } | null;
 }
 
 export interface AcceptAndPrepayResponse extends MartaQuestBaseResponse {
@@ -55,6 +61,36 @@ export interface StartCellarCombatResponse extends MartaQuestBaseResponse {
     questId?: string;
     combat?: any;
     flow?: MartaQuestFlow;
+}
+
+export interface DeclineOfferResponse extends MartaQuestBaseResponse {
+    questId?: string;
+}
+
+export interface TheronAnswerResponse extends MartaQuestBaseResponse {
+    questId?: string;
+    flow?: MartaQuestFlow;
+    isCorrect?: boolean;
+    theronLine?: string;
+    nextQuestion?: {
+        id: string;
+        prompt: string;
+        options: Array<{ id: string; label: string }>;
+    } | null;
+}
+
+export interface TheronRollResponse extends MartaQuestBaseResponse {
+    questId?: string;
+    d20Roll?: number;
+    nftAwarded?: boolean;
+    rewardDraft?: {
+        name: string;
+        rarityTier: number;
+        metadataCid: string;
+        loreCid: string;
+    } | null;
+    flow?: MartaQuestFlow;
+    theronLine?: string;
 }
 
 async function postJson<T>(path: string, body: unknown): Promise<T> {
@@ -104,4 +140,20 @@ export function startAldricCellarCombat(input: { questId: string; playerId: stri
 
 export function turnInAldricQuest(input: { questId: string; playerId: string; characterId: string }) {
     return postJson<TurnInResponse>('/api/quest/aldric/turn-in', input);
+}
+
+export function declineQuestOffer(input: { questId: string; playerId: string }) {
+    return postJson<DeclineOfferResponse>('/api/quest/decline-offer', input);
+}
+
+export function startDialogWithTheron(input: { playerId: string }) {
+    return postJson<StartDialogResponse>('/api/quest/theron/start-dialog', input);
+}
+
+export function submitTheronAnswer(input: { questId: string; playerId: string; answerId: string }) {
+    return postJson<TheronAnswerResponse>('/api/quest/theron/answer', input);
+}
+
+export function submitTheronD20(input: { questId: string; playerId: string; d20Roll: number }) {
+    return postJson<TheronRollResponse>('/api/quest/theron/submit-d20', input);
 }

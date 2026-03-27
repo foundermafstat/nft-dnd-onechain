@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Crown, Gem, HeartPulse, Loader2, Shield, Sparkles, Swords } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { SERVER_URL } from '@/lib/config';
+import { buildTxExplorerUrl } from '@/lib/onechainExplorer';
 
 const panelClass =
   'rounded-[24px] border border-white/10 bg-[linear-gradient(180deg,rgba(20,20,24,0.9),rgba(11,11,14,0.95))] shadow-[0_18px_36px_rgba(0,0,0,0.42)] backdrop-blur';
@@ -126,6 +127,33 @@ function itemIconGlyph(item: InventoryItem | null): string {
   if (item.category === 'Armor') return '⛨';
   if (item.category === 'Gear') return '◍';
   return '✶';
+}
+
+function resolveNftImageUrl(item: InventoryItem): string {
+  const normalizeAssetUrl = (value: string): string => {
+    if (!value) return '';
+    if (value.startsWith('ipfs://')) {
+      return `https://ipfs.io/ipfs/${value.replace('ipfs://', '')}`;
+    }
+    return value;
+  };
+
+  const metadata = (item.metadata && typeof item.metadata === 'object') ? item.metadata : {};
+  const explicitImage = normalizeAssetUrl(String(
+    metadata.image ||
+      metadata.imageUrl ||
+      metadata.nftImage ||
+      metadata.nftImageUrl ||
+      metadata.ipfs_image_url ||
+      metadata.media?.image ||
+      '',
+  ).trim());
+  if (explicitImage) return explicitImage;
+
+  const metadataCid = normalizeAssetUrl(String(metadata.metadataCid || '').trim());
+  if (/^https?:\/\//i.test(metadataCid)) return metadataCid;
+
+  return '';
 }
 
 function buildInventorySlots(
@@ -560,8 +588,24 @@ export default function AccountPage() {
             </div>
           ) : (
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-              {ownedNfts.map((nft) => (
+              {ownedNfts.map((nft) => {
+                const imageUrl = resolveNftImageUrl(nft.item);
+                return (
                 <article key={nft.entryId} className={`${panelClass} p-4`}>
+                  {imageUrl ? (
+                    <div className="mb-3 aspect-square overflow-hidden rounded-xl border border-white/10 bg-[radial-gradient(circle_at_20%_20%,rgba(214,172,93,0.16),transparent_45%),linear-gradient(180deg,rgba(20,20,24,0.92),rgba(10,10,12,0.96))]">
+                      <img
+                        src={imageUrl}
+                        alt={nft.item.name}
+                        className="h-full w-full object-contain"
+                        loading="lazy"
+                      />
+                    </div>
+                  ) : (
+                    <div className="mb-3 flex aspect-square items-center justify-center rounded-xl border border-white/10 bg-[linear-gradient(180deg,rgba(20,20,24,0.92),rgba(10,10,12,0.96))] text-[0.68rem] uppercase tracking-[0.16em] text-stone-500">
+                      no nft image
+                    </div>
+                  )}
                   <div className="mb-2 flex items-start justify-between gap-2">
                     <div>
                       <h3 className="font-cinzel text-[0.92rem] uppercase tracking-[0.09em] text-stone-100">
@@ -599,11 +643,49 @@ export default function AccountPage() {
                     </p>
                   </div>
 
-                  {nft.item.lore && (
-                    <p className="mt-3 line-clamp-3 text-[0.74rem] leading-5 text-stone-400">{nft.item.lore}</p>
-                  )}
+                  {(() => {
+                    const metadata = (nft.item.metadata && typeof nft.item.metadata === 'object')
+                      ? (nft.item.metadata as Record<string, any>)
+                      : {};
+                    const shortDescription = String(
+                      metadata.shortDescription || metadata.description || '',
+                    ).trim();
+                    const longLore = String(nft.item.lore || '').trim();
+                    return (
+                      <>
+                        {shortDescription && (
+                          <p className="mt-3 line-clamp-2 text-[0.74rem] leading-5 text-amber-100/90">
+                            {shortDescription}
+                          </p>
+                        )}
+                        {longLore && (
+                          <p className="mt-2 line-clamp-3 text-[0.72rem] leading-5 text-stone-400">{longLore}</p>
+                        )}
+                      </>
+                    );
+                  })()}
+                  {(() => {
+                    const txHash = String(
+                      (nft.item.metadata && typeof nft.item.metadata === 'object'
+                        ? (nft.item.metadata as Record<string, any>).txHash
+                        : '') || '',
+                    ).trim();
+                    const txUrl = buildTxExplorerUrl(txHash);
+                    if (!txUrl) return null;
+                    return (
+                      <a
+                        href={txUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mt-3 inline-block text-[0.66rem] uppercase tracking-[0.16em] text-amber-300 underline underline-offset-4 hover:text-amber-100"
+                      >
+                        View Transaction
+                      </a>
+                    );
+                  })()}
                 </article>
-              ))}
+              );
+              })}
             </div>
           )}
         </section>
