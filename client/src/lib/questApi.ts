@@ -36,6 +36,15 @@ export interface QuestRewardTx {
     lore_cid?: string;
     image_url?: string;
     created_at?: string;
+    hero?: {
+      character_id?: string;
+      hero_name?: string;
+      hero_class?: string;
+      hero_ancestry?: string;
+      level?: number;
+      alignment?: string;
+      sbt?: Record<string, any> | null;
+    };
 }
 
 export async function fetchQuests(): Promise<Quest[]> {

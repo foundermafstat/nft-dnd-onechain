@@ -6,6 +6,9 @@ import { Crown, Gem, HeartPulse, Loader2, Shield, Sparkles, Swords } from 'lucid
 import { useAuth } from '@/context/AuthContext';
 import { SERVER_URL } from '@/lib/config';
 import { buildTxExplorerUrl } from '@/lib/onechainExplorer';
+import { useOnechainWalletExecutor } from '@/hooks/useOnechainWalletExecutor';
+import { listInventoryForRent, listInventoryForSale } from '@/lib/OneChain';
+import { createRentalListingRecord, createSaleListingRecord, fetchSellerListings, type MarketListing } from '@/lib/marketApi';
 
 const panelClass =
   'rounded-[24px] border border-white/10 bg-[linear-gradient(180deg,rgba(20,20,24,0.9),rgba(11,11,14,0.95))] shadow-[0_18px_36px_rgba(0,0,0,0.42)] backdrop-blur';
@@ -200,7 +203,8 @@ function buildInventorySlots(
 
 export default function AccountPage() {
   const router = useRouter();
-  const { playerId, isLoading } = useAuth();
+  const { playerId, isLoading, walletAddress } = useAuth();
+  const { executor, isExecuting: isWalletExecuting } = useOnechainWalletExecutor();
 
   const [isPageLoading, setIsPageLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -208,6 +212,15 @@ export default function AccountPage() {
   const [ownedNfts, setOwnedNfts] = useState<OwnedNft[]>([]);
   const [inventoryByCharacter, setInventoryByCharacter] = useState<InventoryByCharacter>({});
   const [abilitiesByCharacter, setAbilitiesByCharacter] = useState<Record<string, AbilityProfile[]>>({});
+  const [sellerListingsByEntry, setSellerListingsByEntry] = useState<Record<string, MarketListing[]>>({});
+  const [listingBusyByEntry, setListingBusyByEntry] = useState<Record<string, boolean>>({});
+  const [salePriceByEntry, setSalePriceByEntry] = useState<Record<string, string>>({});
+  const [rentPriceByEntry, setRentPriceByEntry] = useState<Record<string, string>>({});
+  const [collateralByEntry, setCollateralByEntry] = useState<Record<string, string>>({});
+  const [durationHoursByEntry, setDurationHoursByEntry] = useState<Record<string, string>>({});
+  const [manualObjectIdByEntry, setManualObjectIdByEntry] = useState<Record<string, string>>({});
+  const [listingFeedback, setListingFeedback] = useState<string | null>(null);
+  const [listingError, setListingError] = useState<string | null>(null);
 
   useEffect(() => {
     if (isLoading) return;
@@ -299,6 +312,58 @@ export default function AccountPage() {
         );
 
         setOwnedNfts(nftList);
+        setSalePriceByEntry((prev) => {
+          const next = { ...prev };
+          for (const nft of nftList) {
+            if (!next[nft.entryId]) {
+              const baseline = nft.item.rarity === 'Legendary' ? 3.5 : nft.item.rarity === 'Epic' ? 2.0 : 1.1;
+              next[nft.entryId] = String(baseline);
+            }
+          }
+          return next;
+        });
+        setRentPriceByEntry((prev) => {
+          const next = { ...prev };
+          for (const nft of nftList) {
+            if (!next[nft.entryId]) {
+              const baseline = nft.item.rarity === 'Legendary' ? 0.35 : nft.item.rarity === 'Epic' ? 0.2 : 0.12;
+              next[nft.entryId] = String(baseline);
+            }
+          }
+          return next;
+        });
+        setCollateralByEntry((prev) => {
+          const next = { ...prev };
+          for (const nft of nftList) {
+            if (!next[nft.entryId]) {
+              next[nft.entryId] = '0.5';
+            }
+          }
+          return next;
+        });
+        setDurationHoursByEntry((prev) => {
+          const next = { ...prev };
+          for (const nft of nftList) {
+            if (!next[nft.entryId]) {
+              next[nft.entryId] = '24';
+            }
+          }
+          return next;
+        });
+
+        if (walletAddress) {
+          const listings = await fetchSellerListings(walletAddress);
+          const grouped = listings.reduce<Record<string, MarketListing[]>>((acc, listing) => {
+            const key = String(listing.inventory_entry_id || '').trim();
+            if (!key) return acc;
+            if (!acc[key]) acc[key] = [];
+            acc[key].push(listing);
+            return acc;
+          }, {});
+          setSellerListingsByEntry(grouped);
+        } else {
+          setSellerListingsByEntry({});
+        }
       } catch (loadError: any) {
         console.error(loadError);
         setError(loadError?.message || 'Failed to load account data.');
@@ -308,7 +373,7 @@ export default function AccountPage() {
     };
 
     void loadAccount();
-  }, [isLoading, playerId, router]);
+  }, [isLoading, playerId, router, walletAddress]);
 
   const sbtCards = useMemo(
     () =>
@@ -354,6 +419,136 @@ export default function AccountPage() {
       return acc;
     }, {});
   }, [inventoryByCharacter]);
+
+  const refreshSellerListings = async () => {
+    if (!walletAddress) {
+      setSellerListingsByEntry({});
+      return;
+    }
+    const listings = await fetchSellerListings(walletAddress);
+    const grouped = listings.reduce<Record<string, MarketListing[]>>((acc, listing) => {
+      const key = String(listing.inventory_entry_id || '').trim();
+      if (!key) return acc;
+      if (!acc[key]) acc[key] = [];
+      acc[key].push(listing);
+      return acc;
+    }, {});
+    setSellerListingsByEntry(grouped);
+  };
+
+  const setEntryBusy = (entryId: string, busy: boolean) => {
+    setListingBusyByEntry((prev) => ({ ...prev, [entryId]: busy }));
+  };
+
+  const handleCreateSaleListing = async (nft: OwnedNft) => {
+    setListingError(null);
+    setListingFeedback(null);
+    if (!playerId || !walletAddress || !executor) {
+      setListingError('Connect OneWallet to create sale listings.');
+      return;
+    }
+    const rawPrice = Number(salePriceByEntry[nft.entryId] || 0);
+    if (!Number.isFinite(rawPrice) || rawPrice <= 0) {
+      setListingError('Sale price must be greater than zero.');
+      return;
+    }
+    const itemObjectId = String(nft.item.onechain_token_id || manualObjectIdByEntry[nft.entryId] || '').trim();
+    if (!itemObjectId) {
+      setListingError('This NFT has no on-chain object id yet. Provide it manually before listing.');
+      return;
+    }
+
+    setEntryBusy(nft.entryId, true);
+    try {
+      const onchain = await listInventoryForSale({
+        sellerAddress: walletAddress,
+        inventoryNftObjectId: itemObjectId,
+        priceOne: rawPrice,
+      }, executor);
+      if (!onchain.success || !onchain.objectId) {
+        throw new Error(onchain.error || 'Failed to create on-chain sale listing.');
+      }
+
+      await createSaleListingRecord({
+        inventoryEntryId: nft.entryId,
+        sellerPlayerId: playerId,
+        sellerWalletAddress: walletAddress,
+        listingObjectId: onchain.objectId,
+        itemObjectId,
+        salePriceOne: rawPrice,
+        txHashList: onchain.hash || undefined,
+      });
+
+      await refreshSellerListings();
+      setListingFeedback(`Sale listing created for ${nft.item.name}.`);
+    } catch (error: any) {
+      setListingError(error?.message || 'Failed to create sale listing.');
+    } finally {
+      setEntryBusy(nft.entryId, false);
+    }
+  };
+
+  const handleCreateRentalListing = async (nft: OwnedNft) => {
+    setListingError(null);
+    setListingFeedback(null);
+    if (!playerId || !walletAddress || !executor) {
+      setListingError('Connect OneWallet to create rental listings.');
+      return;
+    }
+    const rentPrice = Number(rentPriceByEntry[nft.entryId] || 0);
+    const collateral = Number(collateralByEntry[nft.entryId] || 0);
+    const durationHours = Number(durationHoursByEntry[nft.entryId] || 0);
+    if (!Number.isFinite(rentPrice) || rentPrice <= 0) {
+      setListingError('Rent price must be greater than zero.');
+      return;
+    }
+    if (!Number.isFinite(collateral) || collateral < 0) {
+      setListingError('Collateral must be zero or positive.');
+      return;
+    }
+    if (!Number.isFinite(durationHours) || durationHours <= 0) {
+      setListingError('Duration must be greater than zero hours.');
+      return;
+    }
+    const itemObjectId = String(nft.item.onechain_token_id || manualObjectIdByEntry[nft.entryId] || '').trim();
+    if (!itemObjectId) {
+      setListingError('This NFT has no on-chain object id yet. Provide it manually before listing.');
+      return;
+    }
+
+    setEntryBusy(nft.entryId, true);
+    try {
+      const onchain = await listInventoryForRent({
+        lenderAddress: walletAddress,
+        inventoryNftObjectId: itemObjectId,
+        rentPriceOne: rentPrice,
+        collateralOne: collateral,
+        durationMs: Math.round(durationHours * 60 * 60 * 1000),
+      }, executor);
+      if (!onchain.success || !onchain.objectId) {
+        throw new Error(onchain.error || 'Failed to create on-chain rental listing.');
+      }
+
+      await createRentalListingRecord({
+        inventoryEntryId: nft.entryId,
+        sellerPlayerId: playerId,
+        sellerWalletAddress: walletAddress,
+        listingObjectId: onchain.objectId,
+        itemObjectId,
+        rentPriceOne: rentPrice,
+        collateralOne: collateral,
+        durationMs: Math.round(durationHours * 60 * 60 * 1000),
+        txHashList: onchain.hash || undefined,
+      });
+
+      await refreshSellerListings();
+      setListingFeedback(`Rental listing created for ${nft.item.name}.`);
+    } catch (error: any) {
+      setListingError(error?.message || 'Failed to create rental listing.');
+    } finally {
+      setEntryBusy(nft.entryId, false);
+    }
+  };
 
   if (isLoading || isPageLoading) {
     return (
@@ -582,6 +777,17 @@ export default function AccountPage() {
             <Gem className="h-3.5 w-3.5" />
             Owned NFT Items
           </div>
+          {(listingFeedback || listingError) && (
+            <div
+              className={`mb-3 rounded-xl border px-3 py-2 text-[0.72rem] ${
+                listingError
+                  ? 'border-rose-300/30 bg-rose-300/[0.08] text-rose-100'
+                  : 'border-emerald-300/30 bg-emerald-300/[0.08] text-emerald-100'
+              }`}
+            >
+              {listingError || listingFeedback}
+            </div>
+          )}
           {ownedNfts.length === 0 ? (
             <div className={`${panelClass} p-6 text-[0.82rem] text-stone-400`}>
               No minted NFT items in inventory yet.
@@ -683,6 +889,73 @@ export default function AccountPage() {
                       </a>
                     );
                   })()}
+
+                  <div className="mt-3 space-y-2 rounded-xl border border-white/10 bg-black/20 p-3">
+                    <p className="text-[0.58rem] uppercase tracking-[0.16em] text-stone-500">
+                      Marketplace Controls
+                    </p>
+                    {(sellerListingsByEntry[nft.entryId] || []).filter((listing) => listing.status === 'ACTIVE').length > 0 && (
+                      <div className="space-y-1 rounded-lg border border-emerald-300/25 bg-emerald-300/[0.08] px-2 py-2 text-[0.66rem] text-emerald-100">
+                        {(sellerListingsByEntry[nft.entryId] || [])
+                          .filter((listing) => listing.status === 'ACTIVE')
+                          .map((listing) => (
+                            <p key={listing.id}>
+                              Active {listing.type === 'sale' ? 'sale' : 'rental'} listing · {listing.listing_object_id}
+                            </p>
+                          ))}
+                      </div>
+                    )}
+                    <input
+                      value={manualObjectIdByEntry[nft.entryId] || ''}
+                      onChange={(event) =>
+                        setManualObjectIdByEntry((prev) => ({ ...prev, [nft.entryId]: event.target.value }))
+                      }
+                      placeholder="NFT object id (if token id is empty)"
+                      className="h-9 w-full rounded-lg border border-white/12 bg-white/[0.02] px-3 text-[0.72rem] text-stone-200 placeholder:text-stone-500"
+                    />
+                    <div className="grid grid-cols-2 gap-2">
+                      <input
+                        value={salePriceByEntry[nft.entryId] || ''}
+                        onChange={(event) => setSalePriceByEntry((prev) => ({ ...prev, [nft.entryId]: event.target.value }))}
+                        placeholder="Sale ONE"
+                        className="h-9 rounded-lg border border-white/12 bg-white/[0.02] px-3 text-[0.72rem] text-stone-200 placeholder:text-stone-500"
+                      />
+                      <button
+                        onClick={() => void handleCreateSaleListing(nft)}
+                        disabled={Boolean(listingBusyByEntry[nft.entryId]) || isWalletExecuting}
+                        className="h-9 rounded-lg border border-amber-300/30 bg-amber-300/[0.1] px-2 text-[0.67rem] uppercase tracking-[0.14em] text-amber-100 disabled:opacity-50"
+                      >
+                        {listingBusyByEntry[nft.entryId] ? 'Listing...' : 'List For Sale'}
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-4 gap-2">
+                      <input
+                        value={rentPriceByEntry[nft.entryId] || ''}
+                        onChange={(event) => setRentPriceByEntry((prev) => ({ ...prev, [nft.entryId]: event.target.value }))}
+                        placeholder="Rent"
+                        className="h-9 rounded-lg border border-white/12 bg-white/[0.02] px-2 text-[0.68rem] text-stone-200 placeholder:text-stone-500"
+                      />
+                      <input
+                        value={collateralByEntry[nft.entryId] || ''}
+                        onChange={(event) => setCollateralByEntry((prev) => ({ ...prev, [nft.entryId]: event.target.value }))}
+                        placeholder="Collat"
+                        className="h-9 rounded-lg border border-white/12 bg-white/[0.02] px-2 text-[0.68rem] text-stone-200 placeholder:text-stone-500"
+                      />
+                      <input
+                        value={durationHoursByEntry[nft.entryId] || ''}
+                        onChange={(event) => setDurationHoursByEntry((prev) => ({ ...prev, [nft.entryId]: event.target.value }))}
+                        placeholder="Hours"
+                        className="h-9 rounded-lg border border-white/12 bg-white/[0.02] px-2 text-[0.68rem] text-stone-200 placeholder:text-stone-500"
+                      />
+                      <button
+                        onClick={() => void handleCreateRentalListing(nft)}
+                        disabled={Boolean(listingBusyByEntry[nft.entryId]) || isWalletExecuting}
+                        className="h-9 rounded-lg border border-sky-300/30 bg-sky-300/[0.1] px-2 text-[0.62rem] uppercase tracking-[0.12em] text-sky-100 disabled:opacity-50"
+                      >
+                        {listingBusyByEntry[nft.entryId] ? 'Listing...' : 'List Rent'}
+                      </button>
+                    </div>
+                  </div>
                 </article>
               );
               })}

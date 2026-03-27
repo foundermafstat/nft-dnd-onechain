@@ -162,6 +162,8 @@ export async function generateQuestNftArtifact(
         imageBackground?: 'auto' | 'transparent' | 'opaque';
         styleHint?: string;
         explicitPrompt?: string;
+        avoidNames?: string[];
+        discourageCategories?: string[];
     },
 ): Promise<GeneratedQuestNftArtifact> {
     const contextSummary = summarizeContext(context);
@@ -181,11 +183,22 @@ Return strict JSON only:
   "stats": {},
   "bonuses": {},
   "imagePrompt": "detailed prompt for a single centered item render, no text, no watermark, dramatic but readable, game asset style"
-}`;
+}
+Rules:
+- Keep the artifact tied to quest lore events.
+- Use a fresh, non-generic item name.
+- Prefer category/subcategory diversity when context allows.`;
 
     const userPrompt = [
         contextSummary,
         `Global visual style (mandatory): ${UNIFIED_NFT_ITEM_ART_STYLE}`,
+        options?.avoidNames?.length
+            ? `DO NOT reuse these item names (must be new): ${options.avoidNames.join(', ')}`
+            : '',
+        options?.discourageCategories?.length
+            ? `Avoid repeating these overused categories unless strongly justified: ${options.discourageCategories.join(', ')}`
+            : '',
+        `Variation directive: Forge a distinct artifact archetype and title for this run while preserving quest lore continuity.`,
         options?.styleHint ? `Extra style hint: ${options.styleHint}` : '',
         options?.explicitPrompt ? `Additional creator note: ${options.explicitPrompt}` : '',
     ].filter(Boolean).join('\n\n');

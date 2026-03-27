@@ -11,8 +11,30 @@ import { upsertPlayerByWallet } from './db/playerQueries';
 import { applyQuestProgressToCharacter, createCharacter, getCharacterById, getCharactersByPlayerId } from './db/characterQueries';
 import { createQuest, createQuestWithFlow, finishQuest, getAllQuests, getLatestInProgressQuestForPlayer, getQuestById, getQuestHistory, insertQuestHistory, seedLocations, getAllLocations, getLocationById, upsertPlayerPosition, getPlayerPosition, getPlayersInLocation, updateQuestFlowState } from './db/questQueries';
 import { getNpcsByLocation, getNpcById, seedNpcs } from './db/npcQueries';
-import { seedItems, getAllTemplateItems, getItemsByCategory, getItemById, createItemInstance, createCustomItemInstance, addItemToInventory, getCharacterInventory, removeItemFromInventory, equipItem, unequipItem, updateItemBlockchainInfo, getQuestRewardTransactions } from './db/itemQueries';
+import {
+    seedItems,
+    getAllTemplateItems,
+    getItemsByCategory,
+    getItemById,
+    createItemInstance,
+    createCustomItemInstance,
+    addItemToInventory,
+    getCharacterInventory,
+    removeItemFromInventory,
+    equipItem,
+    unequipItem,
+    updateItemBlockchainInfo,
+    getQuestRewardTransactions,
+    getQuestGeneratedItemSignals,
+} from './db/itemQueries';
 import { seedAbilities, getAllAbilities, getAbilitiesByType, getAbilitiesForClass, getAbilitiesForAncestry, getAbilityById, learnAbility, getCharacterAbilities, forgetAbility, getAbilitiesForProfile } from './db/abilityQueries';
+import {
+    createMarketListing,
+    getActiveMarketListings,
+    getMarketListingsBySellerWallet,
+    markMarketListingClosed,
+    settleSoldListingToBuyerWallet,
+} from './db/marketQueries';
 import { ALL_SEED_LOCATIONS } from './game/locationSeeds';
 import { ALL_SEED_NPCS } from './game/npcSeeds';
 import { ALL_SEED_ITEMS, CLASS_STARTER_ITEMS } from './game/itemSeeds';
@@ -85,6 +107,15 @@ function toSlug(input: string): string {
         .replace(/[^a-z0-9]+/g, '-')
         .replace(/^-+|-+$/g, '')
         .slice(0, 64) || 'nft-item';
+}
+
+function normalizeAssetUrl(value: string | null | undefined): string {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    if (raw.startsWith('ipfs://')) {
+        return `https://ipfs.io/ipfs/${raw.replace('ipfs://', '')}`;
+    }
+    return raw;
 }
 
 function isHeroClass(value: unknown): value is HeroClass {
@@ -216,6 +247,25 @@ async function buildLocationContext(locationId: string, playerId: string) {
             exits,
             spawn_points: spawnPoints,
         },
+    };
+}
+
+function buildPublicHeroSummary(character: any) {
+    if (!character || typeof character !== 'object') return null;
+    const onchain = character.state && typeof character.state === 'object' && character.state.onchain && typeof character.state.onchain === 'object'
+        ? character.state.onchain
+        : {};
+    const sbt = onchain.heroSbtSnapshot && typeof onchain.heroSbtSnapshot === 'object'
+        ? onchain.heroSbtSnapshot
+        : null;
+    return {
+        character_id: String(character.id || '').trim() || undefined,
+        hero_name: String(character.name || '').trim() || undefined,
+        hero_class: String(character.class || '').trim() || undefined,
+        hero_ancestry: String(character.ancestry || '').trim() || undefined,
+        level: Number(character.level || 1),
+        alignment: String(character.alignment || '').trim() || undefined,
+        sbt,
     };
 }
 
@@ -486,6 +536,16 @@ app.post('/api/nft/generate-from-quest', async (req, res) => {
         const lastHistoryLocationId = history?.[history.length - 1]?.location_id || null;
         const resolvedLocationId = locationId || lastHistoryLocationId;
         const location = resolvedLocationId ? await getLocationById(resolvedLocationId) : null;
+        const generationSignals = await getQuestGeneratedItemSignals(questId);
+        let rewardCharacter: any = null;
+        if (characterId) {
+            try {
+                rewardCharacter = await getCharacterById(String(characterId));
+            } catch {
+                rewardCharacter = null;
+            }
+        }
+        const rewardHeroSummary = buildPublicHeroSummary(rewardCharacter);
 
         const artifact = await generateQuestNftArtifact({
             questId,
@@ -507,6 +567,8 @@ app.post('/api/nft/generate-from-quest', async (req, res) => {
             imageQuality,
             imageOutputFormat,
             imageBackground,
+            avoidNames: generationSignals.names,
+            discourageCategories: generationSignals.categories,
         });
 
         const ts = Date.now();
@@ -545,6 +607,11 @@ app.post('/api/nft/generate-from-quest', async (req, res) => {
                     engine_trigger: entry.engine_trigger,
                 })),
             },
+            hero: characterId
+                ? rewardHeroSummary || {
+                    character_id: String(characterId || '').trim() || undefined,
+                }
+                : undefined,
         };
 
         const metadataFileName = `${slug}-${ts}.metadata.json`;
@@ -587,6 +654,13 @@ app.post('/api/nft/generate-from-quest', async (req, res) => {
                 ipfs_metadata_uri: metadataIpfsUri,
                 quest_id: questId,
                 location_id: resolvedLocationId,
+                character_id: rewardHeroSummary?.character_id,
+                hero_name: rewardHeroSummary?.hero_name,
+                hero_class: rewardHeroSummary?.hero_class,
+                hero_ancestry: rewardHeroSummary?.hero_ancestry,
+                hero_level: rewardHeroSummary?.level,
+                hero_alignment: rewardHeroSummary?.alignment,
+                hero_sbt_snapshot: rewardHeroSummary?.sbt || undefined,
                 generated_from: 'quest_context',
             },
             is_template: false,
@@ -852,6 +926,16 @@ app.post('/api/character/:id/inventory/add-custom', async (req, res) => {
                 /([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})/i,
             )?.[1] || null;
         const resolvedQuestId = String(questId || parsedQuestIdFromCid || '').trim();
+        const character = await getCharacterById(characterId);
+        const heroSnapshot =
+            character?.state &&
+            typeof character.state === 'object' &&
+            character.state.onchain &&
+            typeof character.state.onchain === 'object' &&
+            character.state.onchain.heroSbtSnapshot &&
+            typeof character.state.onchain.heroSbtSnapshot === 'object'
+                ? character.state.onchain.heroSbtSnapshot
+                : null;
 
         let generatedLore = String(loreCid || '').trim();
         let generatedDescription = '';
@@ -863,6 +947,7 @@ app.post('/api/character/:id/inventory/add-custom', async (req, res) => {
 
         try {
             if (resolvedQuestId) {
+                const generationSignals = await getQuestGeneratedItemSignals(resolvedQuestId);
                 const quest = await getQuestById(resolvedQuestId);
                 if (quest) {
                     const history = await getQuestHistory(resolvedQuestId);
@@ -884,6 +969,8 @@ app.post('/api/character/:id/inventory/add-custom', async (req, res) => {
                     }, {
                         styleHint:
                             'Unified NFT item template: dark fantasy game item icon, single centered object, transparent background, square composition, production-ready inventory asset.',
+                        avoidNames: generationSignals.names,
+                        discourageCategories: generationSignals.categories,
                     });
 
                     const ts = Date.now();
@@ -915,6 +1002,15 @@ app.post('/api/character/:id/inventory/add-custom', async (req, res) => {
                             template: 'dark_fantasy_item_unified_v1',
                             generated_at: new Date().toISOString(),
                             prompt: artifact.imagePrompt,
+                        },
+                        hero: {
+                            character_id: character?.id || characterId,
+                            hero_name: character?.name || null,
+                            hero_class: character?.class || null,
+                            hero_ancestry: character?.ancestry || null,
+                            hero_level: Number(character?.level || 1),
+                            hero_alignment: character?.alignment || null,
+                            hero_sbt_snapshot: heroSnapshot,
                         },
                     };
 
@@ -950,13 +1046,23 @@ app.post('/api/character/:id/inventory/add-custom', async (req, res) => {
                 metadataCid: String(metadataCid || ''),
                 loreCid: String(loreCid || ''),
                 txHash: String(txHash || ''),
+                quest_id: resolvedQuestId || undefined,
                 questId: resolvedQuestId || undefined,
+                character_id: character?.id || characterId,
+                hero_name: character?.name || undefined,
+                hero_class: character?.class || undefined,
+                hero_ancestry: character?.ancestry || undefined,
+                hero_level: Number(character?.level || 1),
+                hero_alignment: character?.alignment || undefined,
+                hero_sbt_snapshot: heroSnapshot || undefined,
                 shortDescription: generatedDescription || undefined,
                 image: imageUri || undefined,
                 imageUrl: imageGatewayUrl || undefined,
+                ipfs_image_url: imageGatewayUrl || undefined,
                 ipfsMetadataCid: metadataStoredCid || undefined,
                 ipfsMetadataUri: metadataUri || undefined,
                 ipfsMetadataUrl: metadataGatewayUrl || undefined,
+                generated_at: new Date().toISOString(),
             },
             is_template: false,
         });
@@ -1070,6 +1176,303 @@ app.post('/api/item/:id/blockchain', async (req, res) => {
         res.json({ success: true });
     } catch (error: any) {
         res.status(500).json({ error: 'Blockchain update failed', details: error.message });
+    }
+});
+
+// --- MARKET LISTINGS ---
+
+app.get('/api/market/listings', async (req, res) => {
+    try {
+        const typeRaw = String(req.query.type || '').trim().toLowerCase();
+        const type = typeRaw === 'sale' || typeRaw === 'rental' ? typeRaw : undefined;
+        const rows = await getActiveMarketListings(type);
+        res.json({ success: true, listings: rows });
+    } catch (error: any) {
+        res.status(500).json({ error: 'Failed to fetch market listings', details: error.message });
+    }
+});
+
+app.get('/api/market/listings/seller/:wallet', async (req, res) => {
+    try {
+        const wallet = String(req.params.wallet || '').trim().toLowerCase();
+        if (!wallet) return res.status(400).json({ error: 'wallet is required' });
+        const rows = await getMarketListingsBySellerWallet(wallet);
+        res.json({ success: true, listings: rows });
+    } catch (error: any) {
+        res.status(500).json({ error: 'Failed to fetch seller listings', details: error.message });
+    }
+});
+
+app.post('/api/market/listings/sale', async (req, res) => {
+    try {
+        const inventoryEntryId = String(req.body?.inventoryEntryId || '').trim();
+        const sellerWalletAddress = String(req.body?.sellerWalletAddress || '').trim().toLowerCase();
+        const sellerPlayerId = String(req.body?.sellerPlayerId || '').trim();
+        const listingObjectId = String(req.body?.listingObjectId || '').trim();
+        const itemObjectId = String(req.body?.itemObjectId || '').trim();
+        const salePriceOne = Number(req.body?.salePriceOne);
+        const txHashList = String(req.body?.txHashList || '').trim();
+
+        if (!inventoryEntryId || !sellerWalletAddress || !sellerPlayerId || !listingObjectId || !Number.isFinite(salePriceOne) || salePriceOne <= 0) {
+            return res.status(400).json({ error: 'inventoryEntryId, sellerWalletAddress, sellerPlayerId, listingObjectId and valid salePriceOne are required' });
+        }
+
+        const { data: entry, error: entryError } = await supabase
+            .from('character_inventory')
+            .select(`
+                id,
+                character_id,
+                item_id,
+                characters:character_id (id, player_id, name, class, ancestry, level, alignment, state),
+                items:item_id (id, name, category, rarity, lore, metadata, onechain_token_id, is_nft)
+            `)
+            .eq('id', inventoryEntryId)
+            .single();
+
+        if (entryError || !entry) {
+            return res.status(404).json({ error: 'Inventory entry not found' });
+        }
+
+        const character: any = entry.characters;
+        const item: any = entry.items;
+        if (!character || !item) {
+            return res.status(409).json({ error: 'Inventory entry has no linked character/item' });
+        }
+
+        if (String(character.player_id || '') !== sellerPlayerId) {
+            return res.status(403).json({ error: 'Inventory entry does not belong to seller player' });
+        }
+
+        const { data: player, error: playerError } = await supabase
+            .from('players')
+            .select('id, wallet_address')
+            .eq('id', sellerPlayerId)
+            .single();
+
+        if (playerError || !player) {
+            return res.status(404).json({ error: 'Seller player not found' });
+        }
+        if (String(player.wallet_address || '').trim().toLowerCase() !== sellerWalletAddress) {
+            return res.status(403).json({ error: 'Seller wallet does not match player wallet' });
+        }
+
+        const metadata = item.metadata && typeof item.metadata === 'object' ? item.metadata : {};
+        const imageUrl = normalizeAssetUrl(
+            String(
+                metadata.image ||
+                metadata.imageUrl ||
+                metadata.nftImage ||
+                metadata.nftImageUrl ||
+                metadata.ipfs_image_url ||
+                metadata.media?.image ||
+                '',
+            ),
+        );
+
+        const created = await createMarketListing({
+            type: 'sale',
+            itemId: item.id,
+            inventoryEntryId,
+            characterId: character.id,
+            heroName: String(character.name || 'Unknown Hero'),
+            heroClass: String(character.class || ''),
+            heroAncestry: String(character.ancestry || ''),
+            heroLevel: Number(character.level || 1),
+            heroAlignment: String(character.alignment || ''),
+            sellerPlayerId,
+            sellerWalletAddress,
+            listingObjectId,
+            itemObjectId: itemObjectId || String(item.onechain_token_id || ''),
+            title: String(item.name || 'Unnamed NFT'),
+            category: String(item.category || ''),
+            rarity: String(item.rarity || ''),
+            lore: String(item.lore || ''),
+            imageUrl,
+            salePriceOne,
+            metadata: {
+                ...(metadata || {}),
+                tx_hash_list: txHashList || undefined,
+                listed_at: new Date().toISOString(),
+            },
+        });
+
+        if (!created) {
+            return res.status(500).json({ error: 'Failed to create sale listing' });
+        }
+
+        if (txHashList) {
+            await supabase
+                .from('nft_market_listings')
+                .update({ tx_hash_list: txHashList, updated_at: new Date().toISOString() })
+                .eq('id', created.id);
+        }
+
+        res.json({ success: true, listing: created });
+    } catch (error: any) {
+        res.status(500).json({ error: 'Failed to create sale listing', details: error.message });
+    }
+});
+
+app.post('/api/market/listings/rental', async (req, res) => {
+    try {
+        const inventoryEntryId = String(req.body?.inventoryEntryId || '').trim();
+        const sellerWalletAddress = String(req.body?.sellerWalletAddress || '').trim().toLowerCase();
+        const sellerPlayerId = String(req.body?.sellerPlayerId || '').trim();
+        const listingObjectId = String(req.body?.listingObjectId || '').trim();
+        const itemObjectId = String(req.body?.itemObjectId || '').trim();
+        const rentPriceOne = Number(req.body?.rentPriceOne);
+        const collateralOne = Number(req.body?.collateralOne);
+        const durationMs = Number(req.body?.durationMs);
+        const txHashList = String(req.body?.txHashList || '').trim();
+
+        if (
+            !inventoryEntryId ||
+            !sellerWalletAddress ||
+            !sellerPlayerId ||
+            !listingObjectId ||
+            !Number.isFinite(rentPriceOne) ||
+            rentPriceOne <= 0 ||
+            !Number.isFinite(collateralOne) ||
+            collateralOne < 0 ||
+            !Number.isFinite(durationMs) ||
+            durationMs <= 0
+        ) {
+            return res.status(400).json({ error: 'inventoryEntryId, sellerWalletAddress, sellerPlayerId, listingObjectId, rentPriceOne, collateralOne and durationMs are required' });
+        }
+
+        const { data: entry, error: entryError } = await supabase
+            .from('character_inventory')
+            .select(`
+                id,
+                character_id,
+                item_id,
+                characters:character_id (id, player_id, name, class, ancestry, level, alignment, state),
+                items:item_id (id, name, category, rarity, lore, metadata, onechain_token_id, is_nft)
+            `)
+            .eq('id', inventoryEntryId)
+            .single();
+
+        if (entryError || !entry) {
+            return res.status(404).json({ error: 'Inventory entry not found' });
+        }
+
+        const character: any = entry.characters;
+        const item: any = entry.items;
+        if (!character || !item) {
+            return res.status(409).json({ error: 'Inventory entry has no linked character/item' });
+        }
+        if (String(character.player_id || '') !== sellerPlayerId) {
+            return res.status(403).json({ error: 'Inventory entry does not belong to seller player' });
+        }
+
+        const { data: player, error: playerError } = await supabase
+            .from('players')
+            .select('id, wallet_address')
+            .eq('id', sellerPlayerId)
+            .single();
+        if (playerError || !player) {
+            return res.status(404).json({ error: 'Seller player not found' });
+        }
+        if (String(player.wallet_address || '').trim().toLowerCase() !== sellerWalletAddress) {
+            return res.status(403).json({ error: 'Seller wallet does not match player wallet' });
+        }
+
+        const metadata = item.metadata && typeof item.metadata === 'object' ? item.metadata : {};
+        const imageUrl = normalizeAssetUrl(
+            String(
+                metadata.image ||
+                metadata.imageUrl ||
+                metadata.nftImage ||
+                metadata.nftImageUrl ||
+                metadata.ipfs_image_url ||
+                metadata.media?.image ||
+                '',
+            ),
+        );
+
+        const created = await createMarketListing({
+            type: 'rental',
+            itemId: item.id,
+            inventoryEntryId,
+            characterId: character.id,
+            heroName: String(character.name || 'Unknown Hero'),
+            heroClass: String(character.class || ''),
+            heroAncestry: String(character.ancestry || ''),
+            heroLevel: Number(character.level || 1),
+            heroAlignment: String(character.alignment || ''),
+            sellerPlayerId,
+            sellerWalletAddress,
+            listingObjectId,
+            itemObjectId: itemObjectId || String(item.onechain_token_id || ''),
+            title: String(item.name || 'Unnamed NFT'),
+            category: String(item.category || ''),
+            rarity: String(item.rarity || ''),
+            lore: String(item.lore || ''),
+            imageUrl,
+            rentPriceOne,
+            collateralOne,
+            durationMs,
+            metadata: {
+                ...(metadata || {}),
+                tx_hash_list: txHashList || undefined,
+                listed_at: new Date().toISOString(),
+            },
+        });
+
+        if (!created) {
+            return res.status(500).json({ error: 'Failed to create rental listing' });
+        }
+
+        if (txHashList) {
+            await supabase
+                .from('nft_market_listings')
+                .update({ tx_hash_list: txHashList, updated_at: new Date().toISOString() })
+                .eq('id', created.id);
+        }
+
+        res.json({ success: true, listing: created });
+    } catch (error: any) {
+        res.status(500).json({ error: 'Failed to create rental listing', details: error.message });
+    }
+});
+
+app.post('/api/market/listings/:id/close', async (req, res) => {
+    try {
+        const listingId = String(req.params.id || '').trim();
+        const status = String(req.body?.status || '').trim().toUpperCase();
+        const actorWalletAddress = String(req.body?.actorWalletAddress || '').trim().toLowerCase();
+        const closeTxHash = String(req.body?.closeTxHash || '').trim();
+
+        if (!listingId || !status) {
+            return res.status(400).json({ error: 'listing id and status are required' });
+        }
+        if (status !== 'SOLD' && status !== 'RENTED' && status !== 'CANCELLED') {
+            return res.status(400).json({ error: 'status must be SOLD, RENTED or CANCELLED' });
+        }
+
+        if (status === 'SOLD') {
+            if (!actorWalletAddress) {
+                return res.status(400).json({ error: 'actorWalletAddress is required for SOLD settlement' });
+            }
+            const settled = await settleSoldListingToBuyerWallet(listingId, actorWalletAddress);
+            if (!settled) {
+                return res.status(500).json({ error: 'Failed to settle purchased NFT into buyer inventory' });
+            }
+        }
+
+        const success = await markMarketListingClosed(listingId, {
+            status: status as 'SOLD' | 'RENTED' | 'CANCELLED',
+            actorWalletAddress,
+            closeTxHash,
+        });
+
+        if (!success) {
+            return res.status(500).json({ error: 'Failed to close market listing' });
+        }
+
+        res.json({ success: true });
+    } catch (error: any) {
+        res.status(500).json({ error: 'Failed to close market listing', details: error.message });
     }
 });
 
@@ -2110,7 +2513,26 @@ app.get('/api/quest/:id/reward-tx', async (req, res) => {
         const questId = String(req.params.id || '').trim();
         if (!questId) return res.status(400).json({ error: 'quest id is required' });
         const rewards = await getQuestRewardTransactions(questId);
-        res.json({ success: true, rewards });
+        const quest = await getQuestById(questId);
+
+        let fallbackHero: any = null;
+        if (quest && Array.isArray(quest.party_members) && quest.party_members.length > 0) {
+            const firstPlayerId = String(quest.party_members[0] || '').trim();
+            if (firstPlayerId) {
+                const chars = await getCharactersByPlayerId(firstPlayerId);
+                if (Array.isArray(chars) && chars.length > 0) {
+                    fallbackHero = buildPublicHeroSummary(chars[0]);
+                }
+            }
+        }
+
+        const normalized = rewards.map((row) => ({
+            ...row,
+            image_url: normalizeAssetUrl(String(row.image_url || '')) || undefined,
+            hero: row.hero?.hero_name ? row.hero : fallbackHero || undefined,
+        }));
+
+        res.json({ success: true, rewards: normalized });
     } catch (error: any) {
         res.status(500).json({ error: 'Failed to fetch quest reward transactions', details: error.message });
     }

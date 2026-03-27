@@ -58,6 +58,15 @@ function EngineTriggerBadge({ trigger }: { trigger: string | null }) {
   );
 }
 
+function normalizeAssetUrl(value: string | null | undefined): string {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  if (raw.startsWith('ipfs://')) {
+    return `https://ipfs.io/ipfs/${raw.replace('ipfs://', '')}`;
+  }
+  return raw;
+}
+
 export default function QuestLandingPage() {
   const params = useParams();
   const questId = params?.id as string;
@@ -169,11 +178,24 @@ export default function QuestLandingPage() {
             <div className="grid gap-3 md:grid-cols-2">
               {rewards.map((reward) => {
                 const txUrl = buildTxExplorerUrl(reward.tx_hash);
+                const imageUrl = normalizeAssetUrl(reward.image_url || '');
+                const hero = reward.hero || null;
+                const sbt = hero?.sbt && typeof hero.sbt === 'object' ? hero.sbt : null;
                 return (
                   <article
                     key={`${reward.item_id}-${reward.tx_hash}`}
                     className="rounded-xl border border-white/10 bg-white/[0.02] px-3 py-3"
                   >
+                    {imageUrl ? (
+                      <div className="mb-3 overflow-hidden rounded-lg border border-white/10 bg-black/20">
+                        <img
+                          src={imageUrl}
+                          alt={reward.item_name}
+                          className="h-44 w-full object-contain"
+                          loading="lazy"
+                        />
+                      </div>
+                    ) : null}
                     <p className="font-cinzel text-[0.9rem] uppercase tracking-[0.08em] text-stone-100">
                       {reward.item_name}
                     </p>
@@ -182,6 +204,23 @@ export default function QuestLandingPage() {
                         Token: {reward.onechain_token_id}
                       </p>
                     )}
+                    {hero?.hero_name ? (
+                      <div className="mt-2 rounded-lg border border-amber-300/20 bg-amber-300/[0.06] px-2.5 py-2">
+                        <p className="text-[0.55rem] uppercase tracking-[0.16em] text-amber-200/80">Quest Hero</p>
+                        <p className="mt-1 text-[0.75rem] text-amber-100">
+                          {hero.hero_name}
+                          {hero.hero_class ? ` · ${hero.hero_class}` : ''}
+                          {hero.hero_ancestry ? ` · ${hero.hero_ancestry}` : ''}
+                          {hero.level ? ` · Lv.${hero.level}` : ''}
+                        </p>
+                        {sbt ? (
+                          <p className="mt-1 text-[0.68rem] text-stone-300">
+                            STR {sbt.strength ?? 10} · DEX {sbt.dexterity ?? 10} · CON {sbt.constitution ?? 10} ·
+                            INT {sbt.intelligence ?? 10} · WIS {sbt.wisdom ?? 10} · CHA {sbt.charisma ?? 10}
+                          </p>
+                        ) : null}
+                      </div>
+                    ) : null}
                     <p className="mt-1 break-all text-[0.7rem] text-stone-500">TX: {reward.tx_hash}</p>
                     {txUrl && (
                       <a

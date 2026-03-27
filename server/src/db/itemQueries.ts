@@ -273,7 +273,60 @@ export interface QuestRewardTxInfo {
     metadata_cid?: string;
     lore_cid?: string;
     image_url?: string;
+    hero?: {
+        character_id?: string;
+        hero_name?: string;
+        hero_class?: string;
+        hero_ancestry?: string;
+        level?: number;
+        alignment?: string;
+        sbt?: Record<string, any> | null;
+    };
     created_at?: string;
+}
+
+function normalizeAssetUrl(value: string): string {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    if (raw.startsWith('ipfs://')) {
+        return `https://ipfs.io/ipfs/${raw.replace('ipfs://', '')}`;
+    }
+    return raw;
+}
+
+export async function getQuestGeneratedItemSignals(questId: string): Promise<{
+    names: string[];
+    categories: string[];
+}> {
+    const normalizedQuestId = String(questId || '').trim();
+    if (!normalizedQuestId) {
+        return { names: [], categories: [] };
+    }
+
+    const { data, error } = await supabase
+        .from('items')
+        .select('name, category')
+        .eq('is_nft', true)
+        .eq('metadata->>quest_id', normalizedQuestId)
+        .limit(128);
+
+    if (error) {
+        console.error('Error fetching quest generated item signals:', error);
+        return { names: [], categories: [] };
+    }
+
+    const names = new Set<string>();
+    const categories = new Set<string>();
+
+    for (const row of (data || []) as Array<{ name?: string; category?: string }>) {
+        if (row?.name) names.add(String(row.name).trim());
+        if (row?.category) categories.add(String(row.category).trim());
+    }
+
+    return {
+        names: Array.from(names).filter(Boolean),
+        categories: Array.from(categories).filter(Boolean),
+    };
 }
 
 export async function getQuestRewardTransactions(questId: string): Promise<QuestRewardTxInfo[]> {
@@ -301,10 +354,10 @@ export async function getQuestRewardTransactions(questId: string): Promise<Quest
     return rows
         .map((row) => {
             const metadata = (row.metadata && typeof row.metadata === 'object') ? row.metadata : {};
-            const metadataCid = String(metadata.metadataCid || metadata.cid || '');
-            const loreCid = String(metadata.loreCid || '');
+            const metadataCid = String(metadata.metadataCid || metadata.cid || metadata.ipfs_metadata_cid || '');
+            const loreCid = String(metadata.loreCid || metadata.ipfs_lore_cid || '');
             const txHash = String(metadata.txHash || '').trim();
-            const imageUrl = String(
+            const imageUrl = normalizeAssetUrl(String(
                 metadata.image ||
                 metadata.imageUrl ||
                 metadata.nftImage ||
@@ -312,9 +365,11 @@ export async function getQuestRewardTransactions(questId: string): Promise<Quest
                 metadata.ipfs_image_url ||
                 metadata.media?.image ||
                 '',
-            ).trim();
+            ).trim());
+            const metadataQuestId = String(metadata.quest_id || metadata.questId || '').trim();
 
             const belongsToQuest =
+                metadataQuestId === normalizedQuestId ||
                 metadataCid.includes(normalizedQuestId) ||
                 loreCid.includes(normalizedQuestId);
 
@@ -328,6 +383,25 @@ export async function getQuestRewardTransactions(questId: string): Promise<Quest
                 metadata_cid: metadataCid || undefined,
                 lore_cid: loreCid || undefined,
                 image_url: imageUrl || undefined,
+                hero: {
+                    character_id: String(metadata.character_id || metadata.characterId || '').trim() || undefined,
+                    hero_name: String(metadata.hero_name || metadata.heroName || '').trim() || undefined,
+                    hero_class: String(metadata.hero_class || metadata.heroClass || '').trim() || undefined,
+                    hero_ancestry: String(metadata.hero_ancestry || metadata.heroAncestry || '').trim() || undefined,
+                    level: Number.isFinite(Number(metadata.hero_level || metadata.heroLevel))
+                        ? Number(metadata.hero_level || metadata.heroLevel)
+                        : undefined,
+                    alignment: String(metadata.hero_alignment || metadata.heroAlignment || '').trim() || undefined,
+                    sbt:
+                        metadata.hero_sbt_snapshot && typeof metadata.hero_sbt_snapshot === 'object'
+                            ? metadata.hero_sbt_snapshot
+                            : (
+                                metadata.heroSbtSnapshot && typeof metadata.heroSbtSnapshot === 'object'
+                                    ? metadata.heroSbtSnapshot
+                                    : null
+                            ),
+                },
+                created_at: String(metadata.generated_at || metadata.created_at || '').trim() || undefined,
             } satisfies QuestRewardTxInfo;
         })
         .filter(Boolean) as QuestRewardTxInfo[];
