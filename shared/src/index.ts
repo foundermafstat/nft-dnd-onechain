@@ -4,5 +4,7 @@ export * from './models/item';
 export * from './models/location';
 export * from './models/combat';
 export * from './models/rules';
+export * from './models/quickstart';
 export * from './models/scenario';
 export * from './models/onchain';
+export * from './models/quest';

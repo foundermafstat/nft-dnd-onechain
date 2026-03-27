@@ -3,13 +3,23 @@ import { useGameState, ChatMessage } from '@/store/useGameState';
 import { useDroppable } from '@dnd-kit/core';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Button } from '@/components/ui/button';
-import { Backpack, Users, Send, User, Sparkles, Dices, ShieldAlert, CheckCircle2, X, Bot } from 'lucide-react';
+import { Backpack, Users, Send, User, Sparkles, Dices, X, Bot } from 'lucide-react';
 import DraggableItem from './DraggableItem';
 import { DiceType } from '@/components/DiceOverlay';
 import { SERVER_URL } from '@/lib/config';
-import { endGame } from '@/lib/OneChain';
+import { endGame, mintInventoryNFTFromPrepay, startGame } from '@/lib/OneChain';
 import { useAuth } from '@/context/AuthContext';
 import { useOnechainWalletExecutor } from '@/hooks/useOnechainWalletExecutor';
+import {
+    acceptAldricQuestAndPrepay,
+    acceptMartaQuestAndPrepay,
+    startDialogWithAldric,
+    startDialogWithMarta,
+    submitMartaCombatResult,
+    turnInAldricQuest,
+    turnInMartaQuest
+} from '@/lib/martaQuestApi';
+import { quoteAdventurePrepay } from '@/lib/onechainEconomy';
 
 interface InteractionPanelProps {
 	triggerRoll: (type: DiceType) => void;
@@ -41,13 +51,18 @@ export default function InteractionPanel({ triggerRoll }: InteractionPanelProps)
 		entities,
 		testQuestState,
 		setTestQuestState,
-		testQuestSessionId
+		testQuestSessionId,
+        setTestQuestSessionId,
+        activeQuestId,
+        setActiveQuestId,
+        questFlow,
+        setQuestFlow,
+        playerCharacter,
 	} = useGameState();
-	const { walletAddress } = useAuth();
+	const { walletAddress, playerId } = useAuth();
 	const { executor } = useOnechainWalletExecutor();
 	const [inputText, setInputText] = useState('');
 	const [isSendingDialog, setIsSendingDialog] = useState(false);
-	const [isEndingQuest, setIsEndingQuest] = useState(false);
 	const [activeMenu, setActiveMenu] = useState<'inventory' | 'party' | 'playerInfo' | 'skills' | 'dice' | null>(null);
 	const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -83,28 +98,297 @@ export default function InteractionPanel({ triggerRoll }: InteractionPanelProps)
 		}
 	}, [chatMessages, activeMenu]);
 
-	const handleSend = async () => {
-		if (!inputText.trim() || isSendingDialog) return;
+    const mapServerStateToLocal = (state: string) => {
+        if (state === 'OFFERED_BY_MARTA' || state === 'OFFERED_BY_ALDRIC') return 'offered_by_marta' as const;
+        if (state === 'COMBAT_REQUIRED' || state === 'ADVENTURE_ACTIVE' || state === 'ACCEPTED') return 'combat_required' as const;
+        if (state === 'RETURN_TO_MARTA' || state === 'RETURN_TO_ALDRIC') return 'return_to_marta' as const;
+        if (state === 'COMPLETED_SUCCESS') return 'completed_success' as const;
+        if (state === 'COMPLETED_FAIL') return 'completed_fail' as const;
+        return 'not_started' as const;
+    };
 
-		const textToRoute = inputText;
-		setInputText('');
+    const isAcceptIntent = (text: string) =>
+        /(accept|start|yes|agree|begin|take the quest|quest please|get quest|give me a quest|give quest|ready|let'?s go|lets go|беру|принимаю|да|начать|дай квест|возьми квест|готов)/i.test(text);
+    const isTurnInIntent = (text: string) =>
+        /(turn in|report|return|complete|finish|i'm back|im back|back from battle|сдать|вернулся|готово|завершить|я вернулся|закрыть квест)/i.test(text);
+    const isVictoryIntent = (text: string) =>
+        /(report victory|victory|won|i won|победа|выиграл|победил)/i.test(text);
+    const isDefeatIntent = (text: string) =>
+        /(report defeat|defeat|lost|i lost|поражение|проиграл|проигрыш)/i.test(text);
+    const isDeclineIntent = (text: string) =>
+        /(decline|no|not now|later|отказ|нет|не сейчас|позже)/i.test(text);
+
+    const addQuestPrompt = (npcName: string, content: string, quickReplies: Array<{ label: string; payload: string }>) => {
+        addMessage({
+            sender: npcName,
+            senderType: 'dm',
+            content,
+            quickReplies,
+        });
+    };
+
+	const handleSend = async (overrideText?: string) => {
+        const resolved = (overrideText ?? inputText).trim();
+		if (!resolved || isSendingDialog) return;
+
+		const textToRoute = resolved;
+        if (!overrideText) {
+            setInputText('');
+        }
 
 		if (activeNpc) {
 			// NPC Conversation Mode
 			addMessage({ sender: 'Player', senderType: 'player', content: textToRoute });
 
-			// Hackathon Test Quest Progression 
-			if (activeNpc.name === 'Game Master' && testQuestState === 'started') {
-				setTestQuestState('npc_dialog');
-				addMessage({
-					sender: 'Game Master',
-					senderType: 'dm',
-					content: 'Excellent. Your path is clear. Proceed into the wilds and prove your strength against the Goblin! After your victory, claim your prize.',
-					flavorText: 'He nods approvingly, vanishing into the shadows.'
-				});
-				setActiveNpc(null);
-				return;
-			}
+            if (activeNpc.name === 'Old Marta' || activeNpc.name === 'Grim Aldric') {
+                try {
+                    if (!playerId) {
+                        addMessage({ sender: 'System', senderType: 'system', content: 'Player identity is missing.' });
+                        return;
+                    }
+                    const questLine = activeNpc.name === 'Old Marta' ? 'marta' : 'aldric';
+
+                    // Start/refresh the offer
+                    if (testQuestState === 'not_started' || !activeQuestId || !questFlow || questFlow.questLine !== questLine) {
+                        const offer = questLine === 'marta'
+                            ? await startDialogWithMarta({ playerId })
+                            : await startDialogWithAldric({ playerId });
+                        if (offer.questId) setActiveQuestId(offer.questId);
+                        if (offer.flow) {
+                            setQuestFlow(offer.flow);
+                            setTestQuestState(mapServerStateToLocal(offer.flow.state));
+                            if (offer.flow.sessionId) setTestQuestSessionId(offer.flow.sessionId);
+                        }
+                        if (questLine === 'marta') {
+                            addQuestPrompt(
+                                'Old Marta',
+                                offer.martaLine || 'The bones told me you would come...',
+                                [
+                                    { label: 'Agree', payload: 'let us begin' },
+                                    { label: 'Decline', payload: 'not now' },
+                                ],
+                            );
+                        } else {
+                            addQuestPrompt(
+                                'Grim Aldric',
+                                offer.aldricLine || offer.martaLine || 'Rats are eating all my cellar stock. Can you handle them?',
+                                [
+                                    { label: 'Agree', payload: 'i will help with the rats' },
+                                    { label: 'Decline', payload: 'not now' },
+                                ],
+                            );
+                        }
+                        return;
+                    }
+
+                    if (isDeclineIntent(textToRoute)) {
+                        addMessage({
+                            sender: activeNpc.name,
+                            senderType: 'dm',
+                            content: questLine === 'marta'
+                                ? 'Then leave the bones alone for now.'
+                                : 'Fine. Come back when you are ready to work.',
+                        });
+                        return;
+                    }
+
+                    if (testQuestState === 'combat_required') {
+                        if (questLine === 'marta' && activeQuestId && (isVictoryIntent(textToRoute) || isDefeatIntent(textToRoute))) {
+                            const outcome = isVictoryIntent(textToRoute) ? 'success' : 'fail';
+                            const result = await submitMartaCombatResult({
+                                questId: activeQuestId,
+                                playerId,
+                                combatOutcome: outcome,
+                            });
+                            if (result.flow) {
+                                setQuestFlow(result.flow);
+                                setTestQuestState(mapServerStateToLocal(result.flow.state));
+                            } else {
+                                setTestQuestState('return_to_marta');
+                            }
+                            addQuestPrompt(
+                                'Old Marta',
+                                outcome === 'success'
+                                    ? 'You survived. Now return for judgement.'
+                                    : 'You failed the clash. Return and face the bones anyway.',
+                                [{ label: 'Turn In Quest', payload: 'turn in quest now' }],
+                            );
+                            return;
+                        }
+                        addQuestPrompt(
+                            activeNpc.name,
+                            questLine === 'marta'
+                                ? 'Win the mandatory clash first, then return to me.'
+                                : 'The hatch is open. Go to the cellar and kill that rat.',
+                            questLine === 'aldric'
+                                ? [{ label: 'Use Cellar Entrance', payload: 'heading to the cellar now' }]
+                                : [
+                                    { label: 'Report Victory', payload: 'report victory' },
+                                    { label: 'Report Defeat', payload: 'report defeat' },
+                                ],
+                        );
+                        return;
+                    }
+
+                    if (testQuestState === 'return_to_marta' && !isTurnInIntent(textToRoute)) {
+                        addQuestPrompt(
+                            activeNpc.name,
+                            questLine === 'marta'
+                                ? 'Report your result. I will resolve the bones now.'
+                                : 'If the rat is dead, collect your reward now.',
+                            [{ label: 'Turn In Quest', payload: 'turn in quest now' }],
+                        );
+                        return;
+                    }
+
+                    // Accept + prepay + activate adventure
+                    if (testQuestState === 'offered_by_marta' && isAcceptIntent(textToRoute)) {
+                        if (!walletAddress || !executor) {
+                            addMessage({
+                                sender: 'System',
+                                senderType: 'system',
+                                content: `Connect OneWallet before accepting ${activeNpc.name} quest.`,
+                            });
+                            return;
+                        }
+
+                        const quote = quoteAdventurePrepay({ generationCount: 3, mintableDropsEstimate: 1 });
+                        const prepay = await startGame(walletAddress, executor, {
+                            generationCount: 3,
+                            mintableDropsEstimate: 1,
+                            playerRollsCount: 64,
+                            aiRollsCount: 64,
+                        });
+                        if (!prepay.success || !prepay.sessionId || !activeQuestId) {
+                            addMessage({
+                                sender: 'System',
+                                senderType: 'system',
+                                content: `[PREPAY ERROR] ${prepay.error || 'Failed to activate adventure.'}`,
+                            });
+                            return;
+                        }
+
+                        const activated = questLine === 'marta'
+                            ? await acceptMartaQuestAndPrepay({
+                                questId: activeQuestId,
+                                playerId,
+                                sessionId: prepay.sessionId,
+                            })
+                            : await acceptAldricQuestAndPrepay({
+                                questId: activeQuestId,
+                                playerId,
+                                sessionId: prepay.sessionId,
+                            });
+                        setTestQuestSessionId(prepay.sessionId);
+                        if (activated.flow) setQuestFlow(activated.flow);
+                        setTestQuestState('combat_required');
+
+                        addMessage({
+                            sender: 'System',
+                            senderType: 'system',
+                            content: `Quest activated. Session ${prepay.sessionId} locked with prepay ${prepay.paidOne ?? quote.totalOne} ONE.`,
+                            flavorText: 'Dicepack was initialized for mandatory combat stage.',
+                        });
+                        addQuestPrompt(
+                            activeNpc.name,
+                            questLine === 'marta'
+                                ? 'Now go. Win the clash and return. Lose, and return anyway.'
+                                : 'Hatch is open at the north wall. Use it, kill the rat, then report back.',
+                            questLine === 'marta'
+                                ? [{ label: 'Understood', payload: 'i will return after the fight' }]
+                                : [{ label: 'Use Cellar Entrance', payload: 'heading to the cellar now' }],
+                        );
+                        return;
+                    }
+
+                    if (testQuestState === 'return_to_marta' && isTurnInIntent(textToRoute)) {
+                        if (!activeQuestId || !playerCharacter?.id) {
+                            addMessage({
+                                sender: 'System',
+                                senderType: 'system',
+                                content: 'Quest or character reference is missing for turn-in.',
+                            });
+                            return;
+                        }
+                        if (!walletAddress || !executor) {
+                            addMessage({
+                                sender: 'System',
+                                senderType: 'system',
+                                content: 'Reconnect OneWallet to resolve turn-in rewards.',
+                            });
+                            return;
+                        }
+
+                        const turnIn = questLine === 'marta'
+                            ? await turnInMartaQuest({
+                                questId: activeQuestId,
+                                playerId,
+                                characterId: playerCharacter.id,
+                            })
+                            : await turnInAldricQuest({
+                                questId: activeQuestId,
+                                playerId,
+                                characterId: playerCharacter.id,
+                            });
+
+                        let mintedObjectId: string | null = null;
+                        if (turnIn.nftAwarded && turnIn.rewardDraft && testQuestSessionId) {
+                            const minted = await mintInventoryNFTFromPrepay({
+                                playerAddress: walletAddress,
+                                adventureId: testQuestSessionId,
+                                name: turnIn.rewardDraft.name,
+                                rarityTier: turnIn.rewardDraft.rarityTier,
+                                metadataCid: turnIn.rewardDraft.metadataCid,
+                                loreCid: turnIn.rewardDraft.loreCid,
+                            }, executor);
+                            if (minted.success) {
+                                mintedObjectId = minted.objectId || null;
+                            } else {
+                                addMessage({
+                                    sender: 'System',
+                                    senderType: 'system',
+                                    content: `[MINT ERROR] ${minted.error || 'Reward NFT mint failed.'}`,
+                                });
+                            }
+                        }
+
+                        const closeResult = await endGame(walletAddress, testQuestSessionId, executor);
+                        if (!closeResult.success) {
+                            addMessage({
+                                sender: 'System',
+                                senderType: 'system',
+                                content: `[SESSION CLOSE ERROR] ${closeResult.error || 'Could not close adventure escrow.'}`,
+                            });
+                        }
+
+                        if (turnIn.flow) setQuestFlow(turnIn.flow);
+                        setTestQuestState(turnIn.combatOutcome === 'success' ? 'completed_success' : 'completed_fail');
+
+                        addMessage({
+                            sender: activeNpc.name,
+                            senderType: 'dm',
+                            content: questLine === 'marta'
+                                ? `GM roll: ${turnIn.gmRoll}. ${turnIn.nftAwarded ? 'The bones favor you.' : 'Not this time.'}`
+                                : (turnIn.nftAwarded ? 'Good work. Rat is dead, and your trophy rights are confirmed.' : 'You failed the cellar job. No trophy this time.'),
+                            flavorText: turnIn.nftAwarded ? 'A relic-worthy omen settles over the tavern.' : 'The dice clatter and go still.',
+                        });
+
+                        addMessage({
+                            sender: 'System',
+                            senderType: 'system',
+                            content: `Quest resolved. Outcome: ${turnIn.combatOutcome}. NFT: ${turnIn.nftAwarded ? `minted${mintedObjectId ? ` (${mintedObjectId.slice(0, 14)}...)` : ''}` : 'no reward'}. XP +${turnIn.xpDelta || 0}, Lore +${turnIn.loreDelta || 0}, Level +${turnIn.levelDelta || 0}.`,
+                        });
+                        return;
+                    }
+                } catch (err: any) {
+                    addMessage({
+                        sender: 'System',
+                        senderType: 'system',
+                        content: err?.message || `${activeNpc.name} flow failed.`,
+                    });
+                    return;
+                }
+            }
 
 			setIsSendingDialog(true);
 			try {
@@ -151,43 +435,6 @@ export default function InteractionPanel({ triggerRoll }: InteractionPanelProps)
 		}
 	};
 
-	// Trigger Hackathon Test Quest ZK Simulation
-	const handleZkLootRoll = () => {
-		if (testQuestState !== 'combat') {
-			addMessage({ sender: 'System', senderType: 'system', content: 'You must defeat the Goblin first.' });
-			return;
-		}
-
-		triggerRoll('ZK_LOOT');
-	};
-
-	const handleEndQuest = async () => {
-		if (!walletAddress || !testQuestSessionId) return;
-		if (!executor) {
-			addMessage({ sender: 'System', senderType: 'system', content: 'Wallet signer unavailable. Reconnect OneWallet.' });
-			return;
-		}
-		setIsEndingQuest(true);
-		try {
-			const res = await endGame(walletAddress, testQuestSessionId, executor);
-			if (res.success) {
-				setTestQuestState('not_started');
-				setActiveNpc(null);
-				addMessage({
-					sender: 'System',
-					senderType: 'system',
-					content: `Quest Finalized! Session Reference: ${res.hash?.substring(0, 10)}...`
-				});
-			} else {
-				addMessage({ sender: 'System', senderType: 'system', content: `End Game Error: ${res.error}` });
-			}
-		} catch (err: any) {
-			addMessage({ sender: 'System', senderType: 'system', content: `Error: ${err.message}` });
-		} finally {
-			setIsEndingQuest(false);
-		}
-	};
-
 	const handleKeyPress = (e: React.KeyboardEvent) => {
 		if (e.key === 'Enter') handleSend();
 	};
@@ -230,6 +477,20 @@ export default function InteractionPanel({ triggerRoll }: InteractionPanelProps)
 
 								<div className={`max-w-[88%] break-words rounded-[1.25rem] border px-4 py-3 text-[0.82rem] leading-[1.6] shadow-[0_10px_22px_rgba(0,0,0,0.16)] ${getMessageTone(msg.senderType)}`}>
 									<div>{msg.content}</div>
+                                    {Array.isArray(msg.quickReplies) && msg.quickReplies.length > 0 && (
+                                        <div className="mt-3 flex flex-wrap gap-2">
+                                            {msg.quickReplies.map((reply, idx) => (
+                                                <button
+                                                    key={`${msg.id}-reply-${idx}`}
+                                                    onClick={() => handleSend(reply.payload)}
+                                                    disabled={isSendingDialog}
+                                                    className="rounded-xl border border-amber-400/35 bg-amber-400/[0.08] px-3 py-1.5 text-[0.62rem] font-inter font-semibold uppercase tracking-[0.14em] text-amber-100 transition hover:border-amber-200/55 hover:bg-amber-400/[0.16] disabled:opacity-50"
+                                                >
+                                                    {reply.label}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
 
 									{/* Render Spawned Item in Chat (Draggable) */}
 									{msg.itemId && (
@@ -322,37 +583,6 @@ export default function InteractionPanel({ triggerRoll }: InteractionPanelProps)
 					</div>
 				</div>
 
-				{/* Action Grids - Only show if actions exist */}
-				{(testQuestState === 'combat' || testQuestState === 'completed') && (
-					<div className="mb-4 flex gap-4 rounded-[24px] border border-white/6 bg-white/[0.02] p-4">
-						{/* ZK Quest Action (Conditional) */}
-						{testQuestState === 'combat' && (
-							<button
-								onClick={handleZkLootRoll}
-								className="group flex flex-1 flex-col items-center gap-1.5 rounded-2xl border border-emerald-400/20 bg-[linear-gradient(180deg,rgba(17,62,54,0.88),rgba(10,27,27,0.96))] p-3 transition-all hover:-translate-y-0.5 hover:border-emerald-300/42"
-							>
-								<ShieldAlert className="w-5 h-5 text-emerald-400 group-hover:scale-110 transition-transform" />
-								<span className="font-inter text-[0.66rem] font-semibold uppercase tracking-[0.22em] text-emerald-100">Generate ZK Loot</span>
-							</button>
-						)}
-
-						{testQuestState === 'completed' && (
-							<button
-								onClick={handleEndQuest}
-								disabled={isEndingQuest}
-								className="group flex flex-1 flex-col items-center gap-1.5 rounded-2xl border border-amber-400/24 bg-[linear-gradient(180deg,rgba(93,61,22,0.94),rgba(43,31,18,0.98))] p-3 transition-all hover:-translate-y-0.5 hover:border-amber-200/42"
-							>
-								{isEndingQuest ? (
-									<div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-								) : (
-									<CheckCircle2 className="w-5 h-5 text-amber-200 group-hover:scale-110 transition-transform" />
-								)}
-								<span className="font-inter text-[0.66rem] font-semibold uppercase tracking-[0.2em] text-amber-50">Finalize Quest</span>
-							</button>
-						)}
-					</div>
-				)}
-
 				{/* Text Input */}
 				<div className="">
 					<div className="relative flex items-center gap-3">
@@ -385,8 +615,8 @@ export default function InteractionPanel({ triggerRoll }: InteractionPanelProps)
 						/>
 						</div>
 
-						<button
-							onClick={handleSend}
+							<button
+								onClick={() => handleSend()}
 							disabled={!inputText.trim() || currentTurn !== 'player' || isSendingDialog}
 							className="group relative h-13 rounded-[20px] border border-amber-400/30 bg-[linear-gradient(180deg,rgba(110,78,35,0.96),rgba(63,45,22,0.98))] px-6 text-[0.64rem] font-inter font-semibold uppercase tracking-[0.22em] text-amber-50 shadow-[0_14px_28px_rgba(64,41,15,0.34)] transition-all duration-300 hover:border-amber-200/50 hover:shadow-[0_18px_40px_rgba(64,41,15,0.45)] hover:bg-[linear-gradient(180deg,rgba(140,105,50,0.98),rgba(90,65,35,0.98))] hover:brightness-125 hover:-translate-y-0.5 active:translate-y-0 active:scale-95 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0 disabled:hover:brightness-100"
 						>

@@ -1,14 +1,22 @@
 import { create } from 'zustand';
+import type { MartaQuestFlow } from 'shared';
 
 export type ActorType = 'player' | 'enemy' | 'ally' | 'system' | 'dm';
 export type TurnOrder = 'player' | 'enemy' | 'ally';
-export type TestQuestState = 'not_started' | 'started' | 'npc_dialog' | 'combat' | 'loot' | 'completed';
+export type TestQuestState =
+    | 'not_started'
+    | 'offered_by_marta'
+    | 'combat_required'
+    | 'return_to_marta'
+    | 'completed_success'
+    | 'completed_fail';
 
 export interface ChatMessage {
     id: string;
     sender: string;
     senderType: ActorType;
     content: string;
+    quickReplies?: Array<{ label: string; payload: string }>;
     itemId?: string; // If this message spawned an item
     timestamp: number;
     flavorText?: string;
@@ -41,8 +49,13 @@ interface GameState {
     // Test Quest State
     testQuestState: TestQuestState;
     setTestQuestState: (state: TestQuestState) => void;
+    activeQuestId: string | null;
+    setActiveQuestId: (id: string | null) => void;
     testQuestSessionId: number | null;
     setTestQuestSessionId: (id: number | null) => void;
+    questFlow: MartaQuestFlow | null;
+    setQuestFlow: (flow: MartaQuestFlow | null) => void;
+    resetQuestFlow: () => void;
 
     // NPC Dialog State
     activeNpc: { id: string, name: string } | null;
@@ -74,8 +87,18 @@ export const useGameState = create<GameState>((set) => ({
 
     testQuestState: 'not_started',
     setTestQuestState: (state) => set({ testQuestState: state }),
+    activeQuestId: null,
+    setActiveQuestId: (id) => set({ activeQuestId: id }),
     testQuestSessionId: null,
     setTestQuestSessionId: (id) => set({ testQuestSessionId: id }),
+    questFlow: null,
+    setQuestFlow: (flow) => set({ questFlow: flow }),
+    resetQuestFlow: () => set({
+        questFlow: null,
+        activeQuestId: null,
+        testQuestSessionId: null,
+        testQuestState: 'not_started',
+    }),
 
     activeNpc: null,
     setActiveNpc: (npc) => set({ activeNpc: npc }),

@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import type { MartaQuestFlow, QuestState } from 'shared';
 
 export interface QuestLocation {
     id?: string;
@@ -30,6 +31,31 @@ export async function createQuest(partyMembers: string[] = []): Promise<string |
         .single();
     if (error) {
         console.error('Error creating quest:', error);
+        return null;
+    }
+    return data.id;
+}
+
+export async function createQuestWithFlow(
+    partyMembers: string[] = [],
+    flow: MartaQuestFlow,
+): Promise<string | null> {
+    const { data, error } = await supabase
+        .from('quests')
+        .insert([{
+            party_members: partyMembers,
+            status: 'InProgress',
+            stat_changes: {
+                flow,
+                timeline: [
+                    { at: new Date().toISOString(), state: flow.state, reason: 'created' },
+                ],
+            },
+        }])
+        .select('id')
+        .single();
+    if (error) {
+        console.error('Error creating quest with flow:', error);
         return null;
     }
     return data.id;
@@ -103,6 +129,78 @@ export async function getQuestById(questId: string): Promise<any | null> {
         return null;
     }
     return data;
+}
+
+export async function getLatestInProgressQuestForPlayer(playerId: string): Promise<any | null> {
+    const { data, error } = await supabase
+        .from('quests')
+        .select('*')
+        .eq('status', 'InProgress')
+        .order('created_at', { ascending: false })
+        .limit(20);
+    if (error) {
+        console.error('Error fetching in-progress quests:', error);
+        return null;
+    }
+    const matched = (data || []).find((row: any) =>
+        Array.isArray(row.party_members) && row.party_members.includes(playerId),
+    );
+    return matched || null;
+}
+
+export async function updateQuestFlowState(
+    questId: string,
+    input: {
+        state: QuestState;
+        branch?: 'pending' | 'success' | 'fail';
+        combatOutcome?: 'success' | 'fail' | null;
+        sessionId?: number | null;
+        rewardResolution?: MartaQuestFlow['rewardResolution'];
+        rewardDraft?: MartaQuestFlow['rewardDraft'];
+        metadata?: Record<string, unknown>;
+        timelineReason: string;
+    },
+): Promise<boolean> {
+    const quest = await getQuestById(questId);
+    if (!quest) return false;
+
+    const statChanges = (quest.stat_changes && typeof quest.stat_changes === 'object') ? quest.stat_changes : {};
+    const flow = (statChanges.flow && typeof statChanges.flow === 'object') ? statChanges.flow : {};
+    const timeline = Array.isArray(statChanges.timeline) ? statChanges.timeline : [];
+
+    const nextFlow = {
+        ...flow,
+        state: input.state,
+        branch: input.branch ?? flow.branch ?? 'pending',
+        combatOutcome: input.combatOutcome !== undefined ? input.combatOutcome : (flow.combatOutcome ?? null),
+        sessionId: input.sessionId !== undefined ? input.sessionId : (flow.sessionId ?? null),
+        rewardResolution: input.rewardResolution !== undefined ? input.rewardResolution : (flow.rewardResolution ?? null),
+        rewardDraft: input.rewardDraft !== undefined ? input.rewardDraft : (flow.rewardDraft ?? null),
+        updatedAt: new Date().toISOString(),
+    };
+
+    const { error } = await supabase
+        .from('quests')
+        .update({
+            stat_changes: {
+                ...statChanges,
+                ...input.metadata,
+                flow: nextFlow,
+                timeline: [
+                    ...timeline,
+                    { at: new Date().toISOString(), state: input.state, reason: input.timelineReason },
+                ],
+            },
+            updated_at: new Date().toISOString(),
+        })
+        .eq('id', questId);
+
+    if (error) {
+        console.error('Error updating quest flow state:', error);
+        return false;
+    }
+
+    return true;
 }
 
 export async function getQuestHistory(questId: string): Promise<any[]> {

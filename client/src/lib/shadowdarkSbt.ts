@@ -1,8 +1,12 @@
-import { ANCESTRIES, Ancestry, HeroClass, calculateModifier } from 'shared';
+import { ANCESTRIES, Ancestry, HeroClass, calculateGearSlotsForProfile } from 'shared';
 
 export type Alignment = 'Lawful' | 'Neutral' | 'Chaotic';
 
 export interface HeroSbtSnapshot {
+  heroClass: HeroClass;
+  ancestry: Ancestry;
+  level: number;
+  xp: number;
   alignment: Alignment;
   deity: string;
   title: string;
@@ -17,10 +21,44 @@ export interface HeroSbtSnapshot {
   armorClass: number;
   startingGoldGp: number;
   gearSlots: number;
+  gearSlotsUsed: number;
+  gearSlotsFree: number;
+  ancestryGearSlotModifier: number;
+  classGearSlotModifier: number;
+  starterInventory: StarterInventoryItem[];
+  commonCarryRules: string[];
+  loreScore: number;
   languages: string[];
   talents: string[];
   knownSpells: string[];
   ruleset: string;
+  snapshotVersion: string;
+}
+
+export interface StarterInventoryItem {
+  key: string;
+  name: string;
+  quantity: number;
+  slotsPerUnit: number;
+  totalSlots: number;
+  category: 'weapon' | 'armor' | 'shield' | 'tool' | 'consumable' | 'class-kit' | 'currency';
+  notes?: string;
+}
+
+export interface AdventureInventoryDelta {
+  add?: StarterInventoryItem[];
+  removeKeys?: string[];
+  consumedKeys?: string[];
+  goldDeltaGp?: number;
+}
+
+export interface AdventureProgressDelta {
+  xpDelta?: number;
+  levelDelta?: number;
+  loreScoreDelta?: number;
+  updatedKnownSpells?: string[];
+  updatedTalents?: string[];
+  inventoryDelta?: AdventureInventoryDelta;
 }
 
 export const COMMON_LANGUAGES = [
@@ -37,6 +75,29 @@ export const COMMON_LANGUAGES = [
 ] as const;
 
 export const RARE_LANGUAGES = ['Celestial', 'Diabolic', 'Draconic', 'Primordial'] as const;
+
+export const QUICKSTART_BACKGROUNDS = [
+  "Urchin. You grew up in the merciless streets of a large city",
+  "Wanted. There's a price on your head, but you have allies",
+  'Cult Initiate. You know blasphemous secrets and rituals',
+  "Thieves' Guild. You have connections, contacts, and debts",
+  'Banished. Your people cast you out for supposed crimes',
+  'Orphaned. An unusual guardian rescued and raised you',
+  "Wizard's Apprentice. You have a knack and eye for magic",
+  'Jeweler. You can easily appraise value and authenticity',
+  'Herbalist. You know plants, medicines, and poisons',
+  'Barbarian. You left the horde, but it never quite left you',
+  'Mercenary. You fought friend and foe alike for your coin',
+  "Sailor. Pirate, privateer, or merchant - the seas are yours",
+  "Acolyte. You're well trained in religious rites and doctrines",
+  'Soldier. You served as a fighter in an organized army',
+  'Ranger. The woods and wilds are your true home',
+  'Scout. You survived on stealth, observation, and speed',
+  "Minstrel. You've traveled far with your charm and talent",
+  'Scholar. You know much about ancient history and lore',
+  'Noble. A famous name has opened many doors for you',
+  'Chirurgeon. You know anatomy, surgery, and first aid',
+] as const;
 
 export const DEITIES_BY_ALIGNMENT: Record<Alignment, string[]> = {
   Lawful: ['Saint Terragnis', 'Madeera the Covenant'],
@@ -77,6 +138,42 @@ const BASE_CLASS_TALENTS: Record<HeroClass, string[]> = {
 const DEFAULT_PRIEST_LANGUAGE = 'Celestial';
 const DEFAULT_WIZARD_COMMON = ['Dwarvish', 'Elvish'];
 const DEFAULT_WIZARD_RARE = ['Draconic', 'Primordial'];
+const QUICKSTART_RULESET = 'Shadowdark-Quickstart-Strict-v2';
+
+const STARTER_INVENTORY_BY_CLASS: Record<HeroClass, StarterInventoryItem[]> = {
+  [HeroClass.Fighter]: [
+    { key: 'longsword', name: 'Longsword', quantity: 1, slotsPerUnit: 1, totalSlots: 1, category: 'weapon' },
+    { key: 'shield', name: 'Shield', quantity: 1, slotsPerUnit: 1, totalSlots: 1, category: 'shield' },
+    { key: 'leather-armor', name: 'Leather Armor', quantity: 1, slotsPerUnit: 1, totalSlots: 1, category: 'armor' },
+    { key: 'torch', name: 'Torch', quantity: 2, slotsPerUnit: 1, totalSlots: 2, category: 'consumable' },
+    { key: 'rations', name: 'Rations', quantity: 1, slotsPerUnit: 1, totalSlots: 1, category: 'consumable', notes: 'Represents 3 days pack' },
+    { key: 'rope', name: "Rope, 60'", quantity: 1, slotsPerUnit: 1, totalSlots: 1, category: 'tool' },
+  ],
+  [HeroClass.Priest]: [
+    { key: 'mace', name: 'Mace', quantity: 1, slotsPerUnit: 1, totalSlots: 1, category: 'weapon' },
+    { key: 'shield', name: 'Shield', quantity: 1, slotsPerUnit: 1, totalSlots: 1, category: 'shield' },
+    { key: 'leather-armor', name: 'Leather Armor', quantity: 1, slotsPerUnit: 1, totalSlots: 1, category: 'armor' },
+    { key: 'holy-symbol', name: 'Holy Symbol', quantity: 1, slotsPerUnit: 0, totalSlots: 0, category: 'class-kit', notes: 'Class feature item (free slot)' },
+    { key: 'torch', name: 'Torch', quantity: 1, slotsPerUnit: 1, totalSlots: 1, category: 'consumable' },
+    { key: 'rations', name: 'Rations', quantity: 1, slotsPerUnit: 1, totalSlots: 1, category: 'consumable', notes: 'Represents 3 days pack' },
+  ],
+  [HeroClass.Thief]: [
+    { key: 'shortsword', name: 'Shortsword', quantity: 1, slotsPerUnit: 1, totalSlots: 1, category: 'weapon' },
+    { key: 'dagger', name: 'Dagger', quantity: 1, slotsPerUnit: 1, totalSlots: 1, category: 'weapon' },
+    { key: 'leather-armor', name: 'Leather Armor', quantity: 1, slotsPerUnit: 1, totalSlots: 1, category: 'armor' },
+    { key: 'thieves-tools', name: "Thieves' Tools", quantity: 1, slotsPerUnit: 0, totalSlots: 0, category: 'class-kit', notes: 'Class feature tools (free slot)' },
+    { key: 'rope', name: "Rope, 60'", quantity: 1, slotsPerUnit: 1, totalSlots: 1, category: 'tool' },
+    { key: 'torch', name: 'Torch', quantity: 1, slotsPerUnit: 1, totalSlots: 1, category: 'consumable' },
+  ],
+  [HeroClass.Wizard]: [
+    { key: 'staff', name: 'Staff', quantity: 1, slotsPerUnit: 1, totalSlots: 1, category: 'weapon' },
+    { key: 'dagger', name: 'Dagger', quantity: 1, slotsPerUnit: 1, totalSlots: 1, category: 'weapon' },
+    { key: 'spellbook', name: 'Spellbook', quantity: 1, slotsPerUnit: 1, totalSlots: 1, category: 'class-kit' },
+    { key: 'scroll-magic-missile', name: 'Scroll of Magic Missile', quantity: 1, slotsPerUnit: 1, totalSlots: 1, category: 'consumable' },
+    { key: 'torch', name: 'Torch', quantity: 1, slotsPerUnit: 1, totalSlots: 1, category: 'consumable' },
+    { key: 'rations', name: 'Rations', quantity: 1, slotsPerUnit: 1, totalSlots: 1, category: 'consumable', notes: 'Represents 3 days pack' },
+  ],
+};
 
 function unique(values: string[]): string[] {
   return Array.from(new Set(values.map((item) => item.trim()).filter(Boolean)));
@@ -157,11 +254,24 @@ export function buildHeroSbtSnapshot(input: {
         : [];
   const selectedKnownSpells = unique(input.knownSpells ?? []);
 
-  const conMod = calculateModifier(input.stats.con);
-  const baseSlots = Math.max(input.stats.str, 10);
-  const fighterBonusSlots = input.heroClass === HeroClass.Fighter && conMod > 0 ? conMod : 0;
+  const slots = calculateGearSlotsForProfile({
+    str: input.stats.str,
+    con: input.stats.con,
+    heroClass: input.heroClass,
+    ancestry: input.ancestry,
+  });
+  const gearSlots = slots.total;
+  const ancestrySlotModifier = slots.ancestryModifier;
+  const fighterBonusSlots = slots.classModifier;
+  const starterInventory = STARTER_INVENTORY_BY_CLASS[input.heroClass].map((item) => ({ ...item }));
+  const gearSlotsUsed = starterInventory.reduce((sum, item) => sum + item.totalSlots, 0);
+  const gearSlotsFree = Math.max(0, gearSlots - gearSlotsUsed);
 
   return {
+    heroClass: input.heroClass,
+    ancestry: input.ancestry,
+    level: 1,
+    xp: 0,
     alignment: input.alignment,
     deity: input.deity,
     title: levelOneTitle(input.heroClass, input.alignment),
@@ -175,10 +285,60 @@ export function buildHeroSbtSnapshot(input: {
     maxHp: input.maxHp,
     armorClass: input.armorClass,
     startingGoldGp: input.startingGoldGp,
-    gearSlots: baseSlots + fighterBonusSlots,
+    gearSlots,
+    gearSlotsUsed,
+    gearSlotsFree,
+    ancestryGearSlotModifier: ancestrySlotModifier,
+    classGearSlotModifier: fighterBonusSlots,
+    starterInventory,
+    commonCarryRules: [
+      'Carry capacity = max(Strength, 10) + class slot modifiers.',
+      'First 100 coins are free to carry (0 slots).',
+      'Backpack: first one is free to carry.',
+      'Class feature tools/holy symbols may occupy 0 slots as noted.',
+    ],
+    loreScore: 0,
     languages: unique([...baseAncestryLanguages, ...classLanguages]),
     talents,
     knownSpells: selectedKnownSpells.length ? selectedKnownSpells : defaultKnownSpells,
-    ruleset: 'Shadowdark-Quickstart-v1',
+    ruleset: QUICKSTART_RULESET,
+    snapshotVersion: 'hero-sbt-v2',
+  };
+}
+
+export function applyAdventureProgressToHeroSnapshot(
+  snapshot: HeroSbtSnapshot,
+  delta: AdventureProgressDelta
+): HeroSbtSnapshot {
+  const removedKeys = new Set((delta.inventoryDelta?.removeKeys ?? []).map((key) => key.trim()));
+  const consumedKeys = new Set((delta.inventoryDelta?.consumedKeys ?? []).map((key) => key.trim()));
+  const remaining = snapshot.starterInventory
+    .filter((item) => !removedKeys.has(item.key))
+    .map((item) => {
+      if (!consumedKeys.has(item.key) || item.quantity <= 1) return item;
+      const nextQuantity = Math.max(1, item.quantity - 1);
+      const totalSlots = nextQuantity * item.slotsPerUnit;
+      return { ...item, quantity: nextQuantity, totalSlots };
+    });
+  const added = (delta.inventoryDelta?.add ?? []).map((item) => ({
+    ...item,
+    totalSlots: item.quantity * item.slotsPerUnit,
+  }));
+  const starterInventory = [...remaining, ...added];
+  const gearSlotsUsed = starterInventory.reduce((sum, item) => sum + item.totalSlots, 0);
+  const gearSlotsFree = Math.max(0, snapshot.gearSlots - gearSlotsUsed);
+  const nextGold = Math.max(0, snapshot.startingGoldGp + (delta.inventoryDelta?.goldDeltaGp ?? 0));
+
+  return {
+    ...snapshot,
+    level: snapshot.level + Math.max(0, delta.levelDelta ?? 0),
+    xp: snapshot.xp + Math.max(0, delta.xpDelta ?? 0),
+    loreScore: snapshot.loreScore + Math.max(0, delta.loreScoreDelta ?? 0),
+    startingGoldGp: nextGold,
+    gearSlotsUsed,
+    gearSlotsFree,
+    starterInventory,
+    knownSpells: delta.updatedKnownSpells ? unique(delta.updatedKnownSpells) : snapshot.knownSpells,
+    talents: delta.updatedTalents ? unique(delta.updatedTalents) : snapshot.talents,
   };
 }

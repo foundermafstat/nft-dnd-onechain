@@ -1,0 +1,64 @@
+# SBT Storage Contract (Onchain vs Offchain)
+
+## Onchain source (Move contract)
+
+- Struct: `contracts/sources/nft_dnd.move:90` (`HeroSBT`)
+- Mint entrypoint: `contracts/sources/nft_dnd.move:460` (`mint_hero_sbt`)
+- Progress entrypoint: `contracts/sources/nft_dnd.move:594` (`update_hero_progress`)
+
+## Onchain fields (HeroSBT)
+
+Stored directly onchain:
+
+- Identity/profile: `owner`, `hero_name`, `hero_class`, `ancestry`, `alignment`, `deity`, `title`, `background`
+- Core stats: `stat_str`, `stat_dex`, `stat_con`, `stat_int`, `stat_wis`, `stat_cha`
+- Core derived values: `hp_max`, `armor_class`, `starting_gold_gp`, `gear_slots`
+- Compact text payloads: `languages_csv`, `talents_csv`, `known_spells_csv`
+- Metadata cids/rules: `origin_lore_cid`, `portrait_cid`, `hero_sheet_cid`, `ruleset_id`
+- Progress and timestamps: `created_at_ms`, `level`, `xp`, `lore_score`
+
+## Offchain snapshot (DB/state)
+
+Stored in `characters.state.onchain.heroSbtSnapshot` and related state:
+
+- `snapshotVersion`, `ruleset`
+- Expanded starter inventory array, slot usage metrics (`gearSlotsUsed`, `gearSlotsFree`)
+- Carry rule strings and starter inventory metadata
+- Optional creation audit metadata (`state.creation.*`) including roll source and limits
+
+## Mint validation contract in app
+
+Before sending `mint_hero_sbt`, client validates:
+
+- Stats within `3..18`
+- Class/ancestry validity and profile consistency
+- Stats satisfy strict profile limits
+- `gearSlots` matches strict formula
+- HP/AC/gold positive and required identity fields present
+
+Code: `client/src/lib/OneChain.ts:269`
+
+## Post-adventure update split
+
+### Onchain mutable progression (now)
+
+- `level`
+- `xp`
+- `lore_score`
+
+Via: `update_hero_progress` (`client/src/lib/OneChain.ts:426`)
+
+### Offchain mutable progression (now)
+
+- Inventory/loadout deltas
+- Starter inventory replacements/consumption
+- Slot usage (`gearSlotsUsed`, `gearSlotsFree`)
+
+Via: `applyAdventureProgressToHeroSnapshot` (`client/src/lib/shadowdarkSbt.ts:309`)
+
+## Snapshot migration notes
+
+- Current canonical snapshot: `hero-sbt-v2`
+- Legacy snapshots should be read with defaults for newly added inventory/slot metadata
+- Migration policy: treat onchain fields as source of truth for immutable-ish core; enrich offchain document on read/write
+

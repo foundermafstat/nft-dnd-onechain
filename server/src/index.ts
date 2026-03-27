@@ -8,8 +8,8 @@ import CryptoJS from 'crypto-js';
 import { supabase } from './db/supabase';
 import { uploadToIPFS, uploadJsonToIPFS } from './services/ipfs';
 import { upsertPlayerByWallet } from './db/playerQueries';
-import { createCharacter, getCharacterById, getCharactersByPlayerId } from './db/characterQueries';
-import { createQuest, finishQuest, getAllQuests, getQuestById, getQuestHistory, seedLocations, getAllLocations, getLocationById, upsertPlayerPosition, getPlayerPosition, getPlayersInLocation } from './db/questQueries';
+import { applyQuestProgressToCharacter, createCharacter, getCharacterById, getCharactersByPlayerId } from './db/characterQueries';
+import { createQuest, createQuestWithFlow, finishQuest, getAllQuests, getLatestInProgressQuestForPlayer, getQuestById, getQuestHistory, insertQuestHistory, seedLocations, getAllLocations, getLocationById, upsertPlayerPosition, getPlayerPosition, getPlayersInLocation, updateQuestFlowState } from './db/questQueries';
 import { getNpcsByLocation, getNpcById, seedNpcs } from './db/npcQueries';
 import { seedItems, getAllTemplateItems, getItemsByCategory, getItemById, createItemInstance, createCustomItemInstance, addItemToInventory, getCharacterInventory, removeItemFromInventory, equipItem, unequipItem, updateItemBlockchainInfo } from './db/itemQueries';
 import { seedAbilities, getAllAbilities, getAbilitiesByType, getAbilitiesForClass, getAbilitiesForAncestry, getAbilityById, learnAbility, getCharacterAbilities, forgetAbility, getAbilitiesForProfile } from './db/abilityQueries';
@@ -27,6 +27,31 @@ import { getRecentChronicles, insertChronicle } from './db/scenarioQueries';
 import { generateQuestNftArtifact } from './ai/nftItemGenerator';
 import { dicepackService } from './services/dicepack';
 import { onechainContractMeta, onechainEntryTargets, isOnechainContractConfigured } from './services/onechainContract';
+import {
+    buildAldricRewardDraft,
+    buildInitialAldricFlow,
+    buildInitialMartaFlow,
+    buildRewardDraft,
+    computeQuestProgressDelta,
+    GRIM_ALDRIC_NPC_ID,
+    OLD_MARTA_NPC_ID,
+    resolveRewardFromOutcome,
+    rollD20,
+    TAVERN_CELLAR_LOCATION_ID,
+} from './game/martaQuest';
+import {
+    Ancestry,
+    HeroClass,
+    MARTA_QUEST_XP_LEVEL_2_THRESHOLD,
+    CLASS_MODIFIERS,
+    SHADOWDARK_STAT_KEYS,
+    calculateGearSlotsForProfile,
+    calculateModifier,
+    getProfileStatLimits,
+    rollValidQuickstartStats,
+    statsMeetLimits,
+    type ShadowdarkStats,
+} from 'shared';
 
 const questDirector = new QuestDirector();
 const combatEngine = new CombatEngine();
@@ -57,6 +82,107 @@ function toSlug(input: string): string {
         .replace(/[^a-z0-9]+/g, '-')
         .replace(/^-+|-+$/g, '')
         .slice(0, 64) || 'nft-item';
+}
+
+function isHeroClass(value: unknown): value is HeroClass {
+    return typeof value === 'string' && (Object.values(HeroClass) as string[]).includes(value);
+}
+
+function isAncestry(value: unknown): value is Ancestry {
+    return typeof value === 'string' && (Object.values(Ancestry) as string[]).includes(value);
+}
+
+function readStatsFromPayload(payload: unknown): ShadowdarkStats | null {
+    if (!payload || typeof payload !== 'object') return null;
+    const candidate = payload as Record<string, unknown>;
+    const stats = {} as ShadowdarkStats;
+    for (const key of SHADOWDARK_STAT_KEYS) {
+        const raw = candidate[key];
+        if (typeof raw !== 'number' || !Number.isFinite(raw)) return null;
+        stats[key] = Math.floor(raw);
+    }
+    return stats;
+}
+
+function rollDie(sides: number, rng: () => number = Math.random): number {
+    return Math.floor(rng() * sides) + 1;
+}
+
+function readFiniteNumber(value: unknown): number | null {
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value === 'string' && value.trim() !== '') {
+        const parsed = Number(value);
+        if (Number.isFinite(parsed)) return parsed;
+    }
+    return null;
+}
+
+function readQuestFlow(quest: any) {
+    if (!quest || typeof quest !== 'object') return null;
+    const statChanges = quest.stat_changes;
+    if (!statChanges || typeof statChanges !== 'object') return null;
+    const flow = (statChanges as any).flow;
+    if (!flow || typeof flow !== 'object') return null;
+    return flow as any;
+}
+
+function isQuestCompletedState(state: unknown): boolean {
+    return state === 'COMPLETED_SUCCESS' || state === 'COMPLETED_FAIL';
+}
+
+function isQuestInProgressState(state: unknown): boolean {
+    if (typeof state !== 'string') return false;
+    return !isQuestCompletedState(state);
+}
+
+function getQuestLine(flow: any): 'marta' | 'aldric' | null {
+    if (!flow || typeof flow !== 'object') return null;
+    if (flow.questLine === 'marta' || flow.questLine === 'aldric') return flow.questLine;
+    if (flow.martaNpcId === OLD_MARTA_NPC_ID || flow.questGiverNpcId === OLD_MARTA_NPC_ID) return 'marta';
+    if (flow.questGiverNpcId === GRIM_ALDRIC_NPC_ID) return 'aldric';
+    return null;
+}
+
+async function buildLocationContext(locationId: string, playerId: string) {
+    const location = await getLocationById(locationId);
+    if (!location) return null;
+
+    const coordinates = location.coordinates && typeof location.coordinates === 'object' ? location.coordinates : {};
+    const exits = Array.isArray(coordinates.exits) ? [...coordinates.exits] : [];
+    const spawnPoints = Array.isArray(coordinates.spawn_points) ? coordinates.spawn_points : [];
+
+    if (locationId === '00000000-0000-4000-a000-000000000001') {
+        const active = await getLatestInProgressQuestForPlayer(playerId);
+        const activeFlow = readQuestFlow(active);
+        const activeLine = getQuestLine(activeFlow);
+        if (
+            active &&
+            activeFlow &&
+            activeLine === 'aldric' &&
+            (activeFlow.state === 'COMBAT_REQUIRED' || activeFlow.state === 'ADVENTURE_ACTIVE' || activeFlow.state === 'RETURN_TO_ALDRIC') &&
+            !isQuestCompletedState(activeFlow.state)
+        ) {
+            exits.push({
+                tile_x: 17,
+                tile_y: 2,
+                target_location_id: TAVERN_CELLAR_LOCATION_ID,
+                target_location_name: 'Tavern Cellar',
+                spawn_label: 'from_tavern',
+                edge: 'north',
+                dynamic: true,
+                questLine: 'aldric',
+            });
+        }
+    }
+
+    return {
+        ...location,
+        coordinates: {
+            ...coordinates,
+            exits,
+            spawn_points: spawnPoints,
+        },
+    };
 }
 
 app.get('/api/health', (req, res) => {
@@ -135,6 +261,58 @@ The total sum of stats should be around 65-75. Assign highest stats to attribute
     }
 });
 
+app.post('/api/character/roll', async (req, res) => {
+    try {
+        const requestedClass = req.body?.class;
+        const requestedAncestry = req.body?.ancestry;
+        if (!isHeroClass(requestedClass) || !isAncestry(requestedAncestry)) {
+            return res.status(400).json({ error: 'Invalid class or ancestry' });
+        }
+        const heroClass = requestedClass;
+        const ancestry = requestedAncestry;
+
+        const { stats, attempts, limits } = rollValidQuickstartStats({ heroClass, ancestry });
+        const hitDie = CLASS_MODIFIERS[heroClass].hitDie;
+        const hpRoll = rollDie(hitDie);
+        const conModifier = calculateModifier(stats.con);
+        const ancestryBonusHp = ancestry === Ancestry.Dwarf ? 2 : 0;
+        const maxHp = Math.max(1, hpRoll + conModifier) + ancestryBonusHp;
+        const goldDieA = rollDie(6);
+        const goldDieB = rollDie(6);
+        const startingGoldGp = (goldDieA + goldDieB) * 5;
+        const armorClass = 10 + calculateModifier(stats.dex);
+
+        return res.json({
+            success: true,
+            profile: { heroClass, ancestry },
+            stats,
+            limits,
+            attempts,
+            source: 'offchain_strict_quickstart_roll_v1',
+            derived: {
+                hitPoints: {
+                    hitDie,
+                    roll: hpRoll,
+                    conModifier,
+                    ancestryBonus: ancestryBonusHp,
+                    total: maxHp,
+                },
+                armorClass,
+                startingGold: {
+                    dice: [goldDieA, goldDieB],
+                    totalGp: startingGoldGp,
+                },
+            },
+            metadata: {
+                statRoll: '3d6 for each stat; reroll full set when no stat is 14+',
+                profileConstraintsApplied: true,
+            },
+        });
+    } catch (error: any) {
+        return res.status(422).json({ error: 'Character stat roll failed', details: error.message });
+    }
+});
+
 app.post('/api/character/create', async (req, res) => {
     try {
         const characterData = req.body;
@@ -142,6 +320,65 @@ app.post('/api/character/create', async (req, res) => {
         // Basic validation
         if (!characterData.playerId || !characterData.name || !characterData.class || !characterData.ancestry) {
             return res.status(400).json({ error: 'Missing required character fields' });
+        }
+        if (!isHeroClass(characterData.class) || !isAncestry(characterData.ancestry)) {
+            return res.status(400).json({ error: 'Invalid class or ancestry' });
+        }
+
+        const rolledStats = readStatsFromPayload(characterData.stats);
+        if (!rolledStats) {
+            return res.status(400).json({ error: 'Invalid stats payload' });
+        }
+
+        const limits = getProfileStatLimits(characterData.class, characterData.ancestry);
+        if (!statsMeetLimits(rolledStats, limits)) {
+            return res.status(400).json({
+                error: 'Stats do not satisfy class/ancestry limits',
+                limits,
+                stats: rolledStats,
+            });
+        }
+
+        const hpCurrent = readFiniteNumber(characterData.hp_current);
+        const hpMax = readFiniteNumber(characterData.hp_max);
+        const ac = readFiniteNumber(characterData.ac);
+        if (hpCurrent === null || hpMax === null || ac === null || hpCurrent <= 0 || hpMax <= 0 || ac <= 0) {
+            return res.status(400).json({ error: 'hp_current, hp_max and ac must be positive numbers' });
+        }
+
+        const snapshot = characterData.state?.onchain?.heroSbtSnapshot;
+        if (snapshot && typeof snapshot === 'object') {
+            if (snapshot.heroClass !== characterData.class || snapshot.ancestry !== characterData.ancestry) {
+                return res.status(400).json({
+                    error: 'SBT snapshot profile mismatch with character profile',
+                });
+            }
+            if (
+                snapshot.strength !== rolledStats.str ||
+                snapshot.dexterity !== rolledStats.dex ||
+                snapshot.constitution !== rolledStats.con ||
+                snapshot.intelligence !== rolledStats.int ||
+                snapshot.wisdom !== rolledStats.wis ||
+                snapshot.charisma !== rolledStats.cha
+            ) {
+                return res.status(400).json({
+                    error: 'SBT snapshot stats mismatch with character stats',
+                });
+            }
+
+            const expectedSlots = calculateGearSlotsForProfile({
+                str: rolledStats.str,
+                con: rolledStats.con,
+                heroClass: characterData.class,
+                ancestry: characterData.ancestry,
+            }).total;
+            if (Number(snapshot.gearSlots) !== expectedSlots) {
+                return res.status(400).json({
+                    error: 'SBT snapshot gearSlots mismatch with strict carry formula',
+                    expectedGearSlots: expectedSlots,
+                    receivedGearSlots: Number(snapshot.gearSlots),
+                });
+            }
         }
 
         const character = await createCharacter(characterData);
@@ -383,6 +620,22 @@ app.get('/api/location/:id', async (req, res) => {
     }
 });
 
+app.get('/api/location/:id/context', async (req, res) => {
+    try {
+        const playerId = String(req.query?.playerId || '').trim();
+        if (!playerId) {
+            return res.status(400).json({ error: 'playerId is required' });
+        }
+        const location = await buildLocationContext(req.params.id, playerId);
+        if (!location) {
+            return res.status(404).json({ error: 'Location not found' });
+        }
+        res.json({ success: true, location });
+    } catch (error: any) {
+        res.status(500).json({ error: 'Failed to fetch location context', details: error.message });
+    }
+});
+
 app.post('/api/location/seed', async (req, res) => {
     try {
         const dbLocations = ALL_SEED_LOCATIONS.map(loc => ({
@@ -550,10 +803,13 @@ app.post('/api/character/:id/inventory/give-starter-kit', async (req, res) => {
         const starterItems = CLASS_STARTER_ITEMS[heroClass];
         if (!starterItems) return res.status(400).json({ error: `No starter kit for class: ${heroClass}` });
         const results = [];
-        for (const templateId of starterItems) {
-            const itemId = await createItemInstance(templateId);
+        for (const item of starterItems) {
+            const quantity = Math.max(1, Math.floor(item.quantity ?? 1));
+            const itemId = await createItemInstance(item.templateId, {
+                slots: item.slotOverride ?? undefined,
+            });
             if (itemId) {
-                await addItemToInventory(req.params.id, itemId);
+                await addItemToInventory(req.params.id, itemId, quantity);
                 results.push(itemId);
             }
         }
@@ -582,10 +838,13 @@ app.post('/api/character/:id/inventory/ensure-starter-kit', async (req, res) => 
         }
 
         const results: string[] = [];
-        for (const templateId of starterItems) {
-            const itemId = await createItemInstance(templateId);
+        for (const item of starterItems) {
+            const quantity = Math.max(1, Math.floor(item.quantity ?? 1));
+            const itemId = await createItemInstance(item.templateId, {
+                slots: item.slotOverride ?? undefined,
+            });
             if (itemId) {
-                await addItemToInventory(characterId, itemId);
+                await addItemToInventory(characterId, itemId, quantity);
                 results.push(itemId);
             }
         }
@@ -725,6 +984,655 @@ app.delete('/api/character/:id/abilities/:abilityId', async (req, res) => {
     }
 });
 
+
+
+// --- MARTA QUEST ORCHESTRATION ---
+
+app.post('/api/quest/marta/start-dialog', async (req, res) => {
+    try {
+        const playerId = String(req.body?.playerId || '').trim();
+        if (!playerId) {
+            return res.status(400).json({ error: 'playerId is required' });
+        }
+
+        const active = await getLatestInProgressQuestForPlayer(playerId);
+        const activeFlow = readQuestFlow(active);
+        if (active && activeFlow && isQuestInProgressState(activeFlow.state)) {
+            return res.json({
+                success: true,
+                alreadyActive: true,
+                questId: active.id,
+                state: activeFlow.state,
+                flow: activeFlow,
+                martaLine: getQuestLine(activeFlow) === 'marta'
+                    ? 'The bones already named your task. Finish what you started and return.'
+                    : 'Another oath still binds you. End it before taking a new prophecy.',
+            });
+        }
+        if (active && !activeFlow) {
+            return res.status(409).json({
+                error: 'Another in-progress quest already exists for this player',
+                questId: active.id,
+            });
+        }
+
+        const initialFlow = buildInitialMartaFlow();
+        const questId = await createQuestWithFlow([playerId], initialFlow);
+        if (!questId) {
+            return res.status(500).json({ error: 'Failed to create Marta quest' });
+        }
+
+        await insertQuestHistory({
+            quest_id: questId,
+            player_action: 'talk_to_old_marta',
+            ai_narrative: initialFlow.scenario.synopsis,
+            engine_trigger: 'marta_offer',
+            on_chain_event: false,
+        });
+
+        return res.json({
+            success: true,
+            alreadyActive: false,
+            questId,
+            state: initialFlow.state,
+            flow: initialFlow,
+            martaLine: 'The bones marked you. Accept the trial and pay the road, then face what waits below.',
+        });
+    } catch (error: any) {
+        return res.status(500).json({ error: 'Failed to start dialog with Marta', details: error.message });
+    }
+});
+
+app.post('/api/quest/marta/accept-and-prepay', async (req, res) => {
+    try {
+        const questId = String(req.body?.questId || '').trim();
+        const playerId = String(req.body?.playerId || '').trim();
+        const sessionId = Number(req.body?.sessionId);
+
+        if (!questId || !playerId || !Number.isInteger(sessionId) || sessionId <= 0) {
+            return res.status(400).json({ error: 'questId, playerId and valid sessionId are required' });
+        }
+
+        const quest = await getQuestById(questId);
+        if (!quest) return res.status(404).json({ error: 'Quest not found' });
+        if (!Array.isArray(quest.party_members) || !quest.party_members.includes(playerId)) {
+            return res.status(403).json({ error: 'Player is not part of this quest' });
+        }
+
+        const flow = readQuestFlow(quest);
+        if (!flow) return res.status(409).json({ error: 'Quest is not a Marta flow' });
+        if (getQuestLine(flow) !== 'marta') return res.status(409).json({ error: 'Quest is not owned by Old Marta' });
+        if (flow.state !== 'OFFERED_BY_MARTA' && flow.state !== 'NEW') {
+            return res.status(409).json({ error: `Quest cannot be accepted from state ${flow.state}` });
+        }
+
+        const advanced = await updateQuestFlowState(questId, {
+            state: 'COMBAT_REQUIRED',
+            branch: 'pending',
+            sessionId,
+            timelineReason: 'accepted_and_prepay_locked',
+        });
+        if (!advanced) {
+            return res.status(500).json({ error: 'Failed to advance quest to combat stage' });
+        }
+
+        await insertQuestHistory({
+            quest_id: questId,
+            player_action: 'accept_marta_quest_and_prepay',
+            ai_narrative: 'Adventure prepay locked. Marta sends you into the mandatory combat path.',
+            engine_trigger: 'quest_activated',
+            on_chain_event: true,
+        });
+
+        const updated = await getQuestById(questId);
+        return res.json({
+            success: true,
+            questId,
+            state: readQuestFlow(updated)?.state || 'COMBAT_REQUIRED',
+            flow: readQuestFlow(updated),
+        });
+    } catch (error: any) {
+        return res.status(500).json({ error: 'Failed to accept Marta quest', details: error.message });
+    }
+});
+
+app.post('/api/quest/marta/submit-combat-result', async (req, res) => {
+    try {
+        const questId = String(req.body?.questId || '').trim();
+        const playerId = String(req.body?.playerId || '').trim();
+        const combatOutcomeRaw = String(req.body?.combatOutcome || '').trim().toLowerCase();
+        const combatOutcome = combatOutcomeRaw === 'success' ? 'success' : combatOutcomeRaw === 'fail' ? 'fail' : null;
+
+        if (!questId || !playerId || !combatOutcome) {
+            return res.status(400).json({ error: 'questId, playerId and combatOutcome(success|fail) are required' });
+        }
+
+        const quest = await getQuestById(questId);
+        if (!quest) return res.status(404).json({ error: 'Quest not found' });
+        if (!Array.isArray(quest.party_members) || !quest.party_members.includes(playerId)) {
+            return res.status(403).json({ error: 'Player is not part of this quest' });
+        }
+
+        const flow = readQuestFlow(quest);
+        if (!flow) return res.status(409).json({ error: 'Quest is not a Marta flow' });
+        if (getQuestLine(flow) !== 'marta') return res.status(409).json({ error: 'Quest is not owned by Old Marta' });
+        if (flow.state !== 'COMBAT_REQUIRED' && flow.state !== 'ADVENTURE_ACTIVE') {
+            return res.status(409).json({ error: `Combat result is not allowed in state ${flow.state}` });
+        }
+
+        const branch = combatOutcome === 'success' ? 'success' : 'fail';
+        const advanced = await updateQuestFlowState(questId, {
+            state: 'RETURN_TO_MARTA',
+            branch,
+            combatOutcome,
+            timelineReason: `combat_${combatOutcome}`,
+        });
+        if (!advanced) return res.status(500).json({ error: 'Failed to persist combat outcome' });
+
+        await insertQuestHistory({
+            quest_id: questId,
+            player_action: combatOutcome === 'success' ? 'won_mandatory_combat' : 'lost_mandatory_combat',
+            ai_narrative: combatOutcome === 'success'
+                ? 'You survived the mandatory clash. Return to Old Marta for judgement.'
+                : 'You were driven back from battle. Return to Old Marta and accept the consequences.',
+            engine_trigger: combatOutcome === 'success' ? 'combat_success' : 'combat_fail',
+            on_chain_event: false,
+        });
+
+        const updated = await getQuestById(questId);
+        return res.json({
+            success: true,
+            questId,
+            state: readQuestFlow(updated)?.state || 'RETURN_TO_MARTA',
+            branch,
+            flow: readQuestFlow(updated),
+        });
+    } catch (error: any) {
+        return res.status(500).json({ error: 'Failed to submit combat result', details: error.message });
+    }
+});
+
+app.post('/api/quest/marta/turn-in', async (req, res) => {
+    try {
+        const questId = String(req.body?.questId || '').trim();
+        const playerId = String(req.body?.playerId || '').trim();
+        const characterId = String(req.body?.characterId || '').trim();
+
+        if (!questId || !playerId || !characterId) {
+            return res.status(400).json({ error: 'questId, playerId and characterId are required' });
+        }
+
+        const quest = await getQuestById(questId);
+        if (!quest) return res.status(404).json({ error: 'Quest not found' });
+        if (!Array.isArray(quest.party_members) || !quest.party_members.includes(playerId)) {
+            return res.status(403).json({ error: 'Player is not part of this quest' });
+        }
+        const flow = readQuestFlow(quest);
+        if (!flow) return res.status(409).json({ error: 'Quest is not a Marta flow' });
+        if (getQuestLine(flow) !== 'marta') return res.status(409).json({ error: 'Quest is not owned by Old Marta' });
+        if (isQuestCompletedState(flow.state)) {
+            return res.status(409).json({ error: 'Quest already completed' });
+        }
+        if (flow.state !== 'RETURN_TO_MARTA') {
+            return res.status(409).json({ error: `Quest cannot be turned in from state ${flow.state}` });
+        }
+
+        const character = await getCharacterById(characterId);
+        if (!character) return res.status(404).json({ error: 'Character not found' });
+        if (String(character.player_id) !== playerId) {
+            return res.status(403).json({ error: 'Character does not belong to player' });
+        }
+
+        const combatOutcome = flow.combatOutcome === 'success' ? 'success' : 'fail';
+        const gmRoll = rollD20();
+        const rewardResolution = resolveRewardFromOutcome('marta', combatOutcome, gmRoll);
+        const progressDelta = computeQuestProgressDelta(combatOutcome, Number(character.xp || 0));
+        const rewardDraft = rewardResolution.nftAwarded ? buildRewardDraft(questId, gmRoll) : null;
+
+        const progress = await applyQuestProgressToCharacter(characterId, {
+            xpDelta: progressDelta.xpDelta,
+            loreScoreDelta: progressDelta.loreDelta,
+            levelDelta: progressDelta.levelDelta,
+        });
+
+        const nextQuestState = combatOutcome === 'success' ? 'COMPLETED_SUCCESS' : 'COMPLETED_FAIL';
+        await updateQuestFlowState(questId, {
+            state: nextQuestState,
+            branch: combatOutcome === 'success' ? 'success' : 'fail',
+            combatOutcome,
+            rewardResolution,
+            rewardDraft,
+            metadata: {
+                progressSyncPolicy: {
+                    xpLevel2Threshold: MARTA_QUEST_XP_LEVEL_2_THRESHOLD,
+                    mode: 'PENDING_RELAYER',
+                },
+            },
+            timelineReason: 'turn_in_resolved',
+        });
+
+        const latestQuest = await getQuestById(questId);
+        const mergedStatChanges = {
+            ...((latestQuest?.stat_changes && typeof latestQuest.stat_changes === 'object') ? latestQuest.stat_changes : {}),
+            turnIn: {
+                combatOutcome,
+                gmRoll,
+                nftAwarded: rewardResolution.nftAwarded,
+                xpDelta: progressDelta.xpDelta,
+                loreDelta: progressDelta.loreDelta,
+                levelDelta: progressDelta.levelDelta,
+            },
+        };
+        await finishQuest(
+            questId,
+            combatOutcome === 'success' ? 'Success' : 'PartyWiped',
+            rewardResolution.nftAwarded,
+            mergedStatChanges,
+        );
+
+        await insertQuestHistory({
+            quest_id: questId,
+            player_action: 'turn_in_at_marta',
+            player_roll: gmRoll,
+            ai_narrative: rewardResolution.nftAwarded
+                ? 'Marta nods as the dice settle high. She marks your reward as worthy of minting.'
+                : 'Marta studies the bones in silence. This chapter closes without an artifact.',
+            engine_trigger: rewardResolution.nftAwarded ? 'reward_awarded' : 'reward_denied',
+            on_chain_event: rewardResolution.nftAwarded,
+        });
+
+        return res.json({
+            success: true,
+            questId,
+            combatOutcome,
+            gmRoll,
+            nftAwarded: rewardResolution.nftAwarded,
+            nftObjectId: null,
+            rewardDraft,
+            xpDelta: progressDelta.xpDelta,
+            loreDelta: progressDelta.loreDelta,
+            levelDelta: progressDelta.levelDelta,
+            newProgress: {
+                xp: progress.next.xp,
+                level: progress.next.level,
+            },
+            flow: readQuestFlow(await getQuestById(questId)),
+        });
+    } catch (error: any) {
+        return res.status(500).json({ error: 'Failed to turn in Marta quest', details: error.message });
+    }
+});
+
+// --- ALDRIC QUEST ORCHESTRATION ---
+
+app.post('/api/quest/aldric/start-dialog', async (req, res) => {
+    try {
+        const playerId = String(req.body?.playerId || '').trim();
+        if (!playerId) {
+            return res.status(400).json({ error: 'playerId is required' });
+        }
+
+        const active = await getLatestInProgressQuestForPlayer(playerId);
+        const activeFlow = readQuestFlow(active);
+        if (active && activeFlow && isQuestInProgressState(activeFlow.state)) {
+            const activeLine = getQuestLine(activeFlow);
+            return res.json({
+                success: true,
+                alreadyActive: true,
+                questId: active.id,
+                state: activeFlow.state,
+                flow: activeFlow,
+                aldricLine: activeLine === 'aldric'
+                    ? 'You still owe me one rat hunt. Finish it first.'
+                    : 'You are already bound to another quest. Settle that debt first.',
+            });
+        }
+        if (active && !activeFlow) {
+            return res.status(409).json({
+                error: 'Another in-progress quest already exists for this player',
+                questId: active.id,
+            });
+        }
+
+        const initialFlow = buildInitialAldricFlow();
+        const questId = await createQuestWithFlow([playerId], initialFlow);
+        if (!questId) {
+            return res.status(500).json({ error: 'Failed to create Aldric quest' });
+        }
+
+        await insertQuestHistory({
+            quest_id: questId,
+            player_action: 'talk_to_grim_aldric',
+            ai_narrative: initialFlow.scenario.synopsis,
+            engine_trigger: 'aldric_offer',
+            on_chain_event: false,
+        });
+
+        return res.json({
+            success: true,
+            alreadyActive: false,
+            questId,
+            state: initialFlow.state,
+            flow: initialFlow,
+            aldricLine: 'Rats keep eating everything in my cellar. Help me clear them out?',
+        });
+    } catch (error: any) {
+        return res.status(500).json({ error: 'Failed to start dialog with Aldric', details: error.message });
+    }
+});
+
+app.post('/api/quest/aldric/accept-and-prepay', async (req, res) => {
+    try {
+        const questId = String(req.body?.questId || '').trim();
+        const playerId = String(req.body?.playerId || '').trim();
+        const sessionId = Number(req.body?.sessionId);
+
+        if (!questId || !playerId || !Number.isInteger(sessionId) || sessionId <= 0) {
+            return res.status(400).json({ error: 'questId, playerId and valid sessionId are required' });
+        }
+
+        const quest = await getQuestById(questId);
+        if (!quest) return res.status(404).json({ error: 'Quest not found' });
+        if (!Array.isArray(quest.party_members) || !quest.party_members.includes(playerId)) {
+            return res.status(403).json({ error: 'Player is not part of this quest' });
+        }
+
+        const flow = readQuestFlow(quest);
+        if (!flow) return res.status(409).json({ error: 'Quest flow is missing' });
+        if (getQuestLine(flow) !== 'aldric') return res.status(409).json({ error: 'Quest is not owned by Grim Aldric' });
+        if (flow.state !== 'OFFERED_BY_ALDRIC' && flow.state !== 'NEW') {
+            return res.status(409).json({ error: `Quest cannot be accepted from state ${flow.state}` });
+        }
+
+        const advanced = await updateQuestFlowState(questId, {
+            state: 'COMBAT_REQUIRED',
+            branch: 'pending',
+            sessionId,
+            metadata: {
+                cellarEntranceEnabled: true,
+                cellarCombatStarted: false,
+                cellarCombatResolved: false,
+                cellarCombatId: null,
+            },
+            timelineReason: 'accepted_and_prepay_locked',
+        });
+        if (!advanced) return res.status(500).json({ error: 'Failed to activate Aldric quest' });
+
+        await insertQuestHistory({
+            quest_id: questId,
+            player_action: 'accept_aldric_quest_and_prepay',
+            ai_narrative: 'Aldric unlocks the north-wall hatch. Descend and kill the cellar rat.',
+            engine_trigger: 'aldric_quest_activated',
+            on_chain_event: true,
+        });
+
+        const updated = await getQuestById(questId);
+        return res.json({
+            success: true,
+            questId,
+            state: readQuestFlow(updated)?.state || 'COMBAT_REQUIRED',
+            flow: readQuestFlow(updated),
+        });
+    } catch (error: any) {
+        return res.status(500).json({ error: 'Failed to accept Aldric quest', details: error.message });
+    }
+});
+
+app.post('/api/quest/aldric/submit-combat-result', async (req, res) => {
+    try {
+        const questId = String(req.body?.questId || '').trim();
+        const playerId = String(req.body?.playerId || '').trim();
+        const combatOutcomeRaw = String(req.body?.combatOutcome || '').trim().toLowerCase();
+        const combatOutcome = combatOutcomeRaw === 'success' ? 'success' : combatOutcomeRaw === 'fail' ? 'fail' : null;
+        const combatId = String(req.body?.combatId || '').trim() || null;
+
+        if (!questId || !playerId || !combatOutcome) {
+            return res.status(400).json({ error: 'questId, playerId and combatOutcome(success|fail) are required' });
+        }
+
+        const quest = await getQuestById(questId);
+        if (!quest) return res.status(404).json({ error: 'Quest not found' });
+        if (!Array.isArray(quest.party_members) || !quest.party_members.includes(playerId)) {
+            return res.status(403).json({ error: 'Player is not part of this quest' });
+        }
+        const flow = readQuestFlow(quest);
+        if (!flow) return res.status(409).json({ error: 'Quest flow is missing' });
+        if (getQuestLine(flow) !== 'aldric') return res.status(409).json({ error: 'Quest is not owned by Grim Aldric' });
+        if (flow.state !== 'COMBAT_REQUIRED' && flow.state !== 'ADVENTURE_ACTIVE') {
+            return res.status(409).json({ error: `Combat result is not allowed in state ${flow.state}` });
+        }
+
+        const branch = combatOutcome === 'success' ? 'success' : 'fail';
+        const advanced = await updateQuestFlowState(questId, {
+            state: 'RETURN_TO_ALDRIC',
+            branch,
+            combatOutcome,
+            metadata: {
+                cellarCombatResolved: true,
+                cellarCombatId: combatId,
+            },
+            timelineReason: `aldric_combat_${combatOutcome}`,
+        });
+        if (!advanced) return res.status(500).json({ error: 'Failed to persist Aldric combat result' });
+
+        await insertQuestHistory({
+            quest_id: questId,
+            player_action: combatOutcome === 'success' ? 'killed_cellar_rat' : 'fell_to_cellar_rat',
+            ai_narrative: combatOutcome === 'success'
+                ? 'The cellar rat is dead. Return to Grim Aldric.'
+                : 'You were routed from the cellar. Report back to Grim Aldric.',
+            engine_trigger: combatOutcome === 'success' ? 'aldric_combat_success' : 'aldric_combat_fail',
+            on_chain_event: false,
+        });
+
+        const updated = await getQuestById(questId);
+        return res.json({
+            success: true,
+            questId,
+            state: readQuestFlow(updated)?.state || 'RETURN_TO_ALDRIC',
+            branch,
+            flow: readQuestFlow(updated),
+        });
+    } catch (error: any) {
+        return res.status(500).json({ error: 'Failed to submit Aldric combat result', details: error.message });
+    }
+});
+
+app.post('/api/quest/aldric/start-cellar-combat', async (req, res) => {
+    try {
+        const questId = String(req.body?.questId || '').trim();
+        const playerId = String(req.body?.playerId || '').trim();
+        const characterId = String(req.body?.characterId || '').trim();
+
+        if (!questId || !playerId || !characterId) {
+            return res.status(400).json({ error: 'questId, playerId and characterId are required' });
+        }
+
+        const quest = await getQuestById(questId);
+        if (!quest) return res.status(404).json({ error: 'Quest not found' });
+        if (!Array.isArray(quest.party_members) || !quest.party_members.includes(playerId)) {
+            return res.status(403).json({ error: 'Player is not part of this quest' });
+        }
+        const flow = readQuestFlow(quest);
+        if (!flow) return res.status(409).json({ error: 'Quest flow is missing' });
+        if (getQuestLine(flow) !== 'aldric') return res.status(409).json({ error: 'Quest is not owned by Grim Aldric' });
+        if (flow.state !== 'COMBAT_REQUIRED' && flow.state !== 'ADVENTURE_ACTIVE') {
+            return res.status(409).json({ error: `Combat cannot start in state ${flow.state}` });
+        }
+
+        const existingCombatId = flow?.metadata?.cellarCombatId;
+        if (typeof existingCombatId === 'string' && existingCombatId) {
+            const existing = await getCombat(existingCombatId);
+            if (existing) {
+                return res.json({ success: true, combat: existing, questId, flow });
+            }
+        }
+
+        const character = await getCharacterById(characterId);
+        if (!character) return res.status(404).json({ error: 'Character not found' });
+        if (String(character.player_id) !== playerId) {
+            return res.status(403).json({ error: 'Character does not belong to player' });
+        }
+
+        const playerState = {
+            characterId: character.id,
+            name: character.name || 'Hero',
+            stats: character.stats || { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 },
+            ac: Number(character.ac || 11),
+            hp: Number(character.hp || character.max_hp || 10),
+            maxHp: Number(character.max_hp || character.hp || 10),
+            position: { x: 10, y: 12 },
+        };
+        const ratMob = {
+            name: 'Cellar Rat',
+            stats: { str: 8, dex: 12, con: 10, int: 2, wis: 8, cha: 3 },
+            ac: 11,
+            maxHp: 9,
+            damage: '1d4+1',
+            xpReward: 4,
+            position: { x: 10, y: 6 },
+        };
+        const combat = await combatEngine.startCombat(TAVERN_CELLAR_LOCATION_ID, [playerState], [ratMob]);
+        if (!combat) return res.status(500).json({ error: 'Failed to start cellar combat' });
+
+        await updateQuestFlowState(questId, {
+            state: 'COMBAT_REQUIRED',
+            branch: 'pending',
+            metadata: {
+                cellarCombatStarted: true,
+                cellarCombatId: combat.combatId,
+            },
+            timelineReason: 'aldric_cellar_combat_started',
+        });
+
+        await insertQuestHistory({
+            quest_id: questId,
+            location_id: TAVERN_CELLAR_LOCATION_ID,
+            player_action: 'enter_cellar',
+            ai_narrative: 'The hatch slams shut behind you as a giant rat lunges from the dark.',
+            engine_trigger: 'aldric_cellar_combat_start',
+            on_chain_event: false,
+        });
+
+        return res.json({
+            success: true,
+            questId,
+            combat,
+            flow: readQuestFlow(await getQuestById(questId)),
+        });
+    } catch (error: any) {
+        return res.status(500).json({ error: 'Failed to start Aldric cellar combat', details: error.message });
+    }
+});
+
+app.post('/api/quest/aldric/turn-in', async (req, res) => {
+    try {
+        const questId = String(req.body?.questId || '').trim();
+        const playerId = String(req.body?.playerId || '').trim();
+        const characterId = String(req.body?.characterId || '').trim();
+
+        if (!questId || !playerId || !characterId) {
+            return res.status(400).json({ error: 'questId, playerId and characterId are required' });
+        }
+
+        const quest = await getQuestById(questId);
+        if (!quest) return res.status(404).json({ error: 'Quest not found' });
+        if (!Array.isArray(quest.party_members) || !quest.party_members.includes(playerId)) {
+            return res.status(403).json({ error: 'Player is not part of this quest' });
+        }
+        const flow = readQuestFlow(quest);
+        if (!flow) return res.status(409).json({ error: 'Quest flow is missing' });
+        if (getQuestLine(flow) !== 'aldric') return res.status(409).json({ error: 'Quest is not owned by Grim Aldric' });
+        if (isQuestCompletedState(flow.state)) return res.status(409).json({ error: 'Quest already completed' });
+        if (flow.state !== 'RETURN_TO_ALDRIC') {
+            return res.status(409).json({ error: `Quest cannot be turned in from state ${flow.state}` });
+        }
+
+        const character = await getCharacterById(characterId);
+        if (!character) return res.status(404).json({ error: 'Character not found' });
+        if (String(character.player_id) !== playerId) {
+            return res.status(403).json({ error: 'Character does not belong to player' });
+        }
+
+        const combatOutcome = flow.combatOutcome === 'success' ? 'success' : 'fail';
+        const rewardResolution = resolveRewardFromOutcome('aldric', combatOutcome, 20);
+        const progressDelta = computeQuestProgressDelta(combatOutcome, Number(character.xp || 0));
+        const rewardDraft = rewardResolution.nftAwarded ? buildAldricRewardDraft(questId) : null;
+
+        const progress = await applyQuestProgressToCharacter(characterId, {
+            xpDelta: progressDelta.xpDelta,
+            loreScoreDelta: progressDelta.loreDelta,
+            levelDelta: progressDelta.levelDelta,
+        });
+
+        const nextQuestState = combatOutcome === 'success' ? 'COMPLETED_SUCCESS' : 'COMPLETED_FAIL';
+        await updateQuestFlowState(questId, {
+            state: nextQuestState,
+            branch: combatOutcome === 'success' ? 'success' : 'fail',
+            combatOutcome,
+            rewardResolution,
+            rewardDraft,
+            metadata: {
+                cellarEntranceEnabled: false,
+                progressSyncPolicy: {
+                    xpLevel2Threshold: MARTA_QUEST_XP_LEVEL_2_THRESHOLD,
+                    mode: 'PENDING_RELAYER',
+                },
+            },
+            timelineReason: 'aldric_turn_in_resolved',
+        });
+
+        const latestQuest = await getQuestById(questId);
+        const mergedStatChanges = {
+            ...((latestQuest?.stat_changes && typeof latestQuest.stat_changes === 'object') ? latestQuest.stat_changes : {}),
+            turnIn: {
+                combatOutcome,
+                gmRoll: null,
+                nftAwarded: rewardResolution.nftAwarded,
+                xpDelta: progressDelta.xpDelta,
+                loreDelta: progressDelta.loreDelta,
+                levelDelta: progressDelta.levelDelta,
+            },
+        };
+
+        await finishQuest(
+            questId,
+            combatOutcome === 'success' ? 'Success' : 'PartyWiped',
+            rewardResolution.nftAwarded,
+            mergedStatChanges,
+        );
+
+        await insertQuestHistory({
+            quest_id: questId,
+            player_action: 'turn_in_at_aldric',
+            ai_narrative: rewardResolution.nftAwarded
+                ? 'Aldric grunts in approval. Payment and trophy rights are yours.'
+                : 'Aldric curses the rats and waves you off empty-handed.',
+            engine_trigger: rewardResolution.nftAwarded ? 'aldric_reward_awarded' : 'aldric_reward_denied',
+            on_chain_event: rewardResolution.nftAwarded,
+        });
+
+        return res.json({
+            success: true,
+            questId,
+            combatOutcome,
+            gmRoll: null,
+            nftAwarded: rewardResolution.nftAwarded,
+            nftObjectId: null,
+            rewardDraft,
+            xpDelta: progressDelta.xpDelta,
+            loreDelta: progressDelta.loreDelta,
+            levelDelta: progressDelta.levelDelta,
+            newProgress: {
+                xp: progress.next.xp,
+                level: progress.next.level,
+            },
+            flow: readQuestFlow(await getQuestById(questId)),
+        });
+    } catch (error: any) {
+        return res.status(500).json({ error: 'Failed to turn in Aldric quest', details: error.message });
+    }
+});
 
 
 app.get('/api/quest/list', async (req, res) => {

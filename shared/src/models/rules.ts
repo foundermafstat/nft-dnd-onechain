@@ -73,9 +73,13 @@ export const CLASS_MODIFIERS: Record<HeroClass, ClassConfig> = {
 // --- HELPER FUNCTIONS ---
 
 /**
- * Calculates total inventory slots based on STR, checking for Fighter class bonus.
+ * Calculates total inventory slots based on STR and class modifier.
  */
-export function calculateMaxInventorySlots(stats: CharacterStats, heroClass: HeroClass): number {
+export function calculateMaxInventorySlots(
+    stats: CharacterStats,
+    heroClass: HeroClass,
+    ancestry?: Ancestry,
+): number {
     let slots = Math.max(stats.str.value, 10);
 
     // Fighter exception: +CON mod if positive
@@ -83,7 +87,7 @@ export function calculateMaxInventorySlots(stats: CharacterStats, heroClass: Her
         slots += stats.con.mod;
     }
 
-    return slots;
+    return Math.max(1, slots);
 }
 
 /**

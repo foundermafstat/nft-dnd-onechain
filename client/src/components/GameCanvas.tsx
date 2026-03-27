@@ -8,6 +8,7 @@ import { LocationMap, LocationExit, TileType, CombatState } from 'shared';
 import Tooltip from './Tooltip';
 import CombatOverlay from './CombatOverlay';
 import { useGameState } from '@/store/useGameState';
+import { startAldricCellarCombat, submitAldricCombatResult } from '@/lib/martaQuestApi';
 
 interface PlayerNode {
     id: string;
@@ -54,7 +55,15 @@ export default function GameCanvas({ playerId }: GameCanvasProps) {
     const [hoveredEntity, setHoveredEntity] = useState<HoveredEntity | null>(null);
 
     // Global Interaction State
-    const { setActiveNpc, addMessage, playerCharacter } = useGameState();
+    const {
+        setActiveNpc,
+        addMessage,
+        playerCharacter,
+        activeQuestId,
+        questFlow,
+        setQuestFlow,
+        setTestQuestState,
+    } = useGameState();
 
     // Combat state
     const [combatState, setCombatState] = useState<CombatState | null>(null);
@@ -70,6 +79,16 @@ export default function GameCanvas({ playerId }: GameCanvasProps) {
     const npcsRef = useRef<NpcNode[]>([]);
     const walkingRef = useRef(false); // Ref to detect cancellation inside walking loop
     const myPosRef = useRef(myPos);
+    const combatResolutionSentRef = useRef(false);
+
+    const mapServerStateToLocal = (state: string) => {
+        if (state === 'OFFERED_BY_MARTA' || state === 'OFFERED_BY_ALDRIC') return 'offered_by_marta' as const;
+        if (state === 'COMBAT_REQUIRED' || state === 'ADVENTURE_ACTIVE' || state === 'ACCEPTED') return 'combat_required' as const;
+        if (state === 'RETURN_TO_MARTA' || state === 'RETURN_TO_ALDRIC') return 'return_to_marta' as const;
+        if (state === 'COMPLETED_SUCCESS') return 'completed_success' as const;
+        if (state === 'COMPLETED_FAIL') return 'completed_fail' as const;
+        return 'not_started' as const;
+    };
 
     // Keep refs in sync
     useEffect(() => { npcsRef.current = npcs; }, [npcs]);
@@ -119,7 +138,7 @@ export default function GameCanvas({ playerId }: GameCanvasProps) {
         setActiveNpc(null);
         setPreviewPath([]);
         try {
-            const res = await fetch(`${SERVER_URL}/api/location/${locId}`);
+            const res = await fetch(`${SERVER_URL}/api/location/${locId}/context?playerId=${encodeURIComponent(myId.current)}`);
             const data = await res.json();
             if (data.success && data.location) {
                 const map = parseLocationFromAPI(data.location);
@@ -145,6 +164,33 @@ export default function GameCanvas({ playerId }: GameCanvasProps) {
                     senderType: 'system',
                     content: `You have arrived at ${map.name}.`
                 });
+
+                if (
+                    map.id === '00000000-0000-4000-a000-000000000010' &&
+                    questFlow?.questLine === 'aldric' &&
+                    activeQuestId &&
+                    playerCharacter?.id &&
+                    (questFlow.state === 'COMBAT_REQUIRED' || questFlow.state === 'ADVENTURE_ACTIVE')
+                ) {
+                    const started = await startAldricCellarCombat({
+                        questId: activeQuestId,
+                        playerId: myId.current,
+                        characterId: playerCharacter.id,
+                    });
+                    if (started.combat) {
+                        setCombatState(started.combat);
+                        combatResolutionSentRef.current = false;
+                        addMessage({
+                            sender: 'System',
+                            senderType: 'system',
+                            content: 'Cellar combat started. Defeat the rat and return to Grim Aldric.',
+                        });
+                    }
+                    if (started.flow) {
+                        setQuestFlow(started.flow);
+                        setTestQuestState(mapServerStateToLocal(started.flow.state));
+                    }
+                }
 
             } else {
                 loadFallbackLocation();
@@ -700,6 +746,40 @@ export default function GameCanvas({ playerId }: GameCanvasProps) {
                     onCombatUpdate={(state) => setCombatState(state)}
                     onCombatEnd={(result) => {
                         console.log('Combat ended:', result);
+                        if (
+                            !combatResolutionSentRef.current &&
+                            questFlow?.questLine === 'aldric' &&
+                            activeQuestId
+                        ) {
+                            combatResolutionSentRef.current = true;
+                            const combatOutcome = result === 'VICTORY' ? 'success' : 'fail';
+                            submitAldricCombatResult({
+                                questId: activeQuestId,
+                                playerId: myId.current,
+                                combatOutcome,
+                                combatId: combatState?.combatId,
+                            })
+                                .then((payload) => {
+                                    if (payload.flow) {
+                                        setQuestFlow(payload.flow);
+                                        setTestQuestState(mapServerStateToLocal(payload.flow.state));
+                                    }
+                                    addMessage({
+                                        sender: 'System',
+                                        senderType: 'system',
+                                        content: combatOutcome === 'success'
+                                            ? 'The rat is dead. Return to Grim Aldric for turn-in.'
+                                            : 'You were defeated in the cellar. Return to Grim Aldric.',
+                                    });
+                                })
+                                .catch((err: any) => {
+                                    addMessage({
+                                        sender: 'System',
+                                        senderType: 'system',
+                                        content: err?.message || 'Failed to submit cellar combat result.',
+                                    });
+                                });
+                        }
                         setTimeout(() => setCombatState(null), 3000);
                     }}
                     onSelectTarget={(callback) => {

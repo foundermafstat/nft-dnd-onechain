@@ -81,3 +81,91 @@ export async function getCharacterById(characterId: string) {
 
     return data;
 }
+
+export interface CharacterQuestProgressDelta {
+    xpDelta: number;
+    loreScoreDelta: number;
+    levelDelta: number;
+}
+
+export async function applyQuestProgressToCharacter(
+    characterId: string,
+    delta: CharacterQuestProgressDelta,
+) {
+    const character = await getCharacterById(characterId);
+    if (!character) {
+        throw new Error('Character not found');
+    }
+
+    const currentXp = Number(character.xp || 0);
+    const currentLevel = Number(character.level || 1);
+    const currentState = (character.state && typeof character.state === 'object')
+        ? character.state
+        : {};
+    const currentOnchain = (currentState.onchain && typeof currentState.onchain === 'object')
+        ? currentState.onchain
+        : {};
+    const currentSnapshot = (currentOnchain.heroSbtSnapshot && typeof currentOnchain.heroSbtSnapshot === 'object')
+        ? currentOnchain.heroSbtSnapshot
+        : null;
+
+    const nextXp = currentXp + Math.max(0, Math.floor(delta.xpDelta));
+    const nextLevel = currentLevel + Math.max(0, Math.floor(delta.levelDelta));
+
+    const nextState = {
+        ...currentState,
+        progression: {
+            ...((currentState.progression && typeof currentState.progression === 'object') ? currentState.progression : {}),
+            xp: nextXp,
+            level: nextLevel,
+            updatedAt: new Date().toISOString(),
+        },
+        onchain: {
+            ...currentOnchain,
+            heroSbtSnapshot: currentSnapshot
+                ? {
+                    ...currentSnapshot,
+                    xp: nextXp,
+                    level: nextLevel,
+                    loreScore: Number(currentSnapshot.loreScore || 0) + Math.max(0, Math.floor(delta.loreScoreDelta)),
+                }
+                : undefined,
+            pendingProgressSync: {
+                xpDelta: Math.max(0, Math.floor(delta.xpDelta)),
+                loreScoreDelta: Math.max(0, Math.floor(delta.loreScoreDelta)),
+                levelDelta: Math.max(0, Math.floor(delta.levelDelta)),
+                status: 'PENDING_RELAYER',
+                updatedAt: new Date().toISOString(),
+            },
+        },
+    };
+
+    const { data, error } = await supabase
+        .from('characters')
+        .update({
+            xp: nextXp,
+            level: nextLevel,
+            state: nextState,
+            updated_at: new Date().toISOString(),
+        })
+        .eq('id', characterId)
+        .select('*')
+        .single();
+
+    if (error) {
+        console.error('Error applying quest progress to character:', error);
+        throw error;
+    }
+
+    return {
+        previous: {
+            xp: currentXp,
+            level: currentLevel,
+        },
+        next: {
+            xp: Number(data?.xp || nextXp),
+            level: Number(data?.level || nextLevel),
+        },
+        character: data,
+    };
+}

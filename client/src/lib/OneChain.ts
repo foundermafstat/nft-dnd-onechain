@@ -6,11 +6,19 @@ import {
   ONECHAIN_ENTRY_TARGETS,
   assertOnechainContractConfigured,
 } from '@/lib/onechainContract';
-import { isOnechainObjectId } from 'shared';
+import {
+  Ancestry,
+  HeroClass,
+  calculateGearSlotsForProfile,
+  getProfileStatLimits,
+  isOnechainObjectId,
+  statsMeetLimits,
+} from 'shared';
 import { Transaction } from '@mysten/sui/transactions';
 
 type TxKind =
   | 'hero_sbt_mint'
+  | 'hero_progress_update'
   | 'adventure_prepay'
   | 'adventure_finalize'
   | 'inventory_nft_mint'
@@ -66,6 +74,15 @@ interface StartAdventureInput {
   mintableDropsEstimate: number;
   playerRollsCount?: number;
   aiRollsCount?: number;
+}
+
+interface UpdateHeroProgressInput {
+  playerAddress: string;
+  heroObjectId: string;
+  adminCapObjectId: string;
+  levelDelta?: number;
+  xpDelta?: number;
+  loreScoreDelta?: number;
 }
 
 interface MintInventoryInput {
@@ -154,6 +171,14 @@ function oneToMist(one: number): number {
 
 function normalizeAddress(address: string): string {
   return address.trim().toLowerCase();
+}
+
+function isHeroClass(value: string): value is HeroClass {
+  return (Object.values(HeroClass) as string[]).includes(value);
+}
+
+function isAncestry(value: string): value is Ancestry {
+  return (Object.values(Ancestry) as string[]).includes(value);
 }
 
 function readNumberField(value: unknown): number | undefined {
@@ -276,6 +301,66 @@ export async function mintHeroSBT(
     if (!input.sbtSnapshot.languages.length) {
       return { success: false, kind: 'hero_sbt_mint', error: 'SBT languages cannot be empty.' };
     }
+    const heroClassValue = input.heroClass.trim();
+    const ancestryValue = input.ancestry.trim();
+    if (!isHeroClass(heroClassValue) || !isAncestry(ancestryValue)) {
+      return {
+        success: false,
+        kind: 'hero_sbt_mint',
+        error: 'Hero class/ancestry is invalid for strict rules.',
+      };
+    }
+    if (
+      input.sbtSnapshot.heroClass !== heroClassValue ||
+      input.sbtSnapshot.ancestry !== ancestryValue
+    ) {
+      return {
+        success: false,
+        kind: 'hero_sbt_mint',
+        error: 'SBT snapshot profile does not match mint profile.',
+      };
+    }
+
+    const strictStats = {
+      str: input.sbtSnapshot.strength,
+      dex: input.sbtSnapshot.dexterity,
+      con: input.sbtSnapshot.constitution,
+      int: input.sbtSnapshot.intelligence,
+      wis: input.sbtSnapshot.wisdom,
+      cha: input.sbtSnapshot.charisma,
+    };
+    const strictLimits = getProfileStatLimits(heroClassValue, ancestryValue);
+    if (!statsMeetLimits(strictStats, strictLimits)) {
+      return {
+        success: false,
+        kind: 'hero_sbt_mint',
+        error: 'SBT stats do not satisfy strict class/ancestry limits.',
+      };
+    }
+    if (
+      input.sbtSnapshot.maxHp <= 0 ||
+      input.sbtSnapshot.armorClass <= 0 ||
+      input.sbtSnapshot.startingGoldGp <= 0
+    ) {
+      return {
+        success: false,
+        kind: 'hero_sbt_mint',
+        error: 'SBT derived fields (HP/AC/gold) must be positive.',
+      };
+    }
+    const expectedSlots = calculateGearSlotsForProfile({
+      str: strictStats.str,
+      con: strictStats.con,
+      heroClass: heroClassValue,
+      ancestry: ancestryValue,
+    }).total;
+    if (input.sbtSnapshot.gearSlots !== expectedSlots) {
+      return {
+        success: false,
+        kind: 'hero_sbt_mint',
+        error: `SBT gear slots mismatch. Expected ${expectedSlots}, got ${input.sbtSnapshot.gearSlots}.`,
+      };
+    }
 
     const quote = quoteHeroMintCost();
     const paymentMist = oneToMist(quote.mintFeeOne);
@@ -334,6 +419,59 @@ export async function mintHeroSBT(
       success: false,
       kind: 'hero_sbt_mint',
       error: error?.message || 'Failed to mint hero SBT on OneChain',
+    };
+  }
+}
+
+export async function updateHeroProgressOnChain(
+  input: UpdateHeroProgressInput,
+  executor?: OnechainWalletExecutor,
+): Promise<OneChainResult> {
+  try {
+    assertOnechainContractConfigured();
+    const executorError = ensureExecutor(executor, input.playerAddress, 'hero_progress_update');
+    if (executorError) return executorError;
+    if (!isOnechainObjectId(input.heroObjectId)) {
+      return { success: false, kind: 'hero_progress_update', error: 'heroObjectId is invalid.' };
+    }
+    if (!isOnechainObjectId(input.adminCapObjectId)) {
+      return { success: false, kind: 'hero_progress_update', error: 'adminCapObjectId is invalid.' };
+    }
+
+    const levelDelta = Math.max(0, Math.floor(input.levelDelta ?? 0));
+    const xpDelta = Math.max(0, Math.floor(input.xpDelta ?? 0));
+    const loreScoreDelta = Math.max(0, Math.floor(input.loreScoreDelta ?? 0));
+    if (levelDelta === 0 && xpDelta === 0 && loreScoreDelta === 0) {
+      return { success: false, kind: 'hero_progress_update', error: 'At least one progress delta must be > 0.' };
+    }
+
+    const tx = new Transaction();
+    tx.moveCall({
+      target: ONECHAIN_ENTRY_TARGETS.updateHeroProgress,
+      arguments: [
+        tx.object(ONECHAIN_CONTRACT_META.registryObjectId),
+        tx.object(input.adminCapObjectId),
+        tx.object(input.heroObjectId),
+        tx.pure.u64(levelDelta),
+        tx.pure.u64(xpDelta),
+        tx.pure.u64(loreScoreDelta),
+      ],
+    });
+
+    const execution = await executor!.execute(tx);
+    return baseSuccessResult(
+      'hero_progress_update',
+      execution?.digest,
+      ONECHAIN_ENTRY_TARGETS.updateHeroProgress,
+      0,
+      parseGasFeeOne(execution),
+    );
+  } catch (error: any) {
+    console.error('Error updating hero progress on OneChain:', error);
+    return {
+      success: false,
+      kind: 'hero_progress_update',
+      error: error?.message || 'Failed to update hero progress on OneChain',
     };
   }
 }

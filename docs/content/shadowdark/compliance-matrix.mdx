@@ -1,0 +1,19 @@
+# Shadowdark Compliance Matrix
+
+| Rule ID | Requirement | Code Mapping | Status | Severity | Action |
+|---|---|---|---|---|---|
+| SD-CR-001 | 3d6 stat generation | `server/src/index.ts:183` (`/api/character/roll`) | Compliant | P0 | Server-authoritative strict roll |
+| SD-CR-002 | Reroll if no 14+ | `shared/src/models/quickstart.ts:123` (`rollValidQuickstartStats`) | Compliant | P0 | Unified in shared rules |
+| SD-CR-003 | Stat bounds and profile constraints | `shared/src/models/quickstart.ts:35`, `client/src/app/create/page.tsx:179`, `server/src/index.ts:235` | Compliant | P0 | Client and server use same limits |
+| SD-CR-004 | Strict flow must gate mint/create | `client/src/app/create/page.tsx:206`, `client/src/app/create/page.tsx:390` | Compliant | P0 | Forge blocked until fresh strict roll |
+| SD-CR-005 | Manual point-buy secondary/disabled | `client/src/app/create/page.tsx:176` | Compliant | P1 | `MANUAL_STAT_EDIT_ENABLED = false` |
+| SD-DER-001 | HP/AC/gold derived from strict roll | `server/src/index.ts:194`, `client/src/app/create/page.tsx:366` | Compliant | P0 | Derived payload returned by strict endpoint |
+| SD-INV-001 | Slot formula from attributes, no halfling slot penalty | `shared/src/models/quickstart.ts:154`, `shared/src/models/rules.ts:78` | Compliant | P0 | Halfling slot penalty removed |
+| SD-INV-002 | Starter kit quantity and class-kit zero-slot handling | `server/src/game/itemSeeds.ts:877`, `server/src/index.ts:703`, `server/src/db/itemQueries.ts:98` | Compliant | P0 | Quantity and slot override supported |
+| SD-SBT-001 | Mint payload must satisfy strict profile and slot formula | `client/src/lib/OneChain.ts:269` | Compliant | P0 | Added field-level strict validation before tx |
+| SD-SBT-002 | Onchain progress update entrypoint in app | `client/src/lib/OneChain.ts:426` | Compliant | P0 | Uses `update_hero_progress` |
+| SD-SBT-003 | Split mutable inventory/loadout offchain | `client/src/lib/shadowdarkSbt.ts:309` | Compliant | P0 | Snapshot mutation offchain; onchain progress only |
+| SD-CORE-001 | Full gear shop purchase flow from 2d6x5 gp | `/create` UX (not fully implemented) | Partial | P1 | Current flow is starter-kit-first, not full buy screen |
+| SD-CORE-002 | Item cost parity with full quickstart tables | `server/src/game/itemSeeds.ts` | Partial | P1 | Several template prices are project-tuned/non-canonical |
+| SD-CORE-003 | Spellcasting/mishap audit parity across runtime systems | `server/src/combat/*`, `shared/src/models/*` | Backlog | P2 | Requires dedicated subsystem audit pass |
+

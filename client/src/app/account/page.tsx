@@ -297,7 +297,7 @@ export default function AccountPage() {
           alignment:
             character.state?.onchain?.heroSbtSnapshot?.alignment || character.alignment || 'Neutral',
           background: character.state?.onchain?.heroSbtSnapshot?.background || 'No background recorded.',
-          ruleset: character.state?.onchain?.heroSbtSnapshot?.ruleset || 'Shadowdark-Quickstart-v1',
+          ruleset: character.state?.onchain?.heroSbtSnapshot?.ruleset || 'Shadowdark-Quickstart-Strict-v2',
           mintHash: character.state?.onchain?.heroSbtMintHash || '',
           strength: character.state?.onchain?.heroSbtSnapshot?.strength ?? 10,
           dexterity: character.state?.onchain?.heroSbtSnapshot?.dexterity ?? 10,

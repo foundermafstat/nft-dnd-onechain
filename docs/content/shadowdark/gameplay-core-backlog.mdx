@@ -1,0 +1,31 @@
+# Gameplay Core Backlog
+
+This backlog captures remaining audit work after strict character creation + SBT mapping fixes.
+
+## Completed in this iteration
+
+- Strict offchain stat roll endpoint and strict create gating
+- Unified client/server profile limits through shared rules
+- Halfling slot penalty removed; slot formula is attribute/class-based
+- Starter kit quantity + class-kit zero-slot handling
+- Mint-side strict validation for profile and slot consistency
+- Onchain/offchain SBT split documented
+
+## P0 (must keep stable)
+
+1. Add integration tests for `/api/character/roll` and `/api/character/create` strict validation matrix.
+2. Add regression tests for starter kits: quantity, slot override, and empty-inventory seed idempotency.
+3. Add compatibility test for existing heroes with old snapshots (`hero-sbt-v1` to `hero-sbt-v2` read path).
+
+## P1 (next priority)
+
+1. Implement full creation-time gear purchase flow from `2d6*5 gp` budget as optional strict mode extension.
+2. Audit all item costs in `server/src/game/itemSeeds.ts` and `server/src/game/quickstartCommonItemSeeds.ts` against quickstart tables.
+3. Add explicit server endpoint for post-adventure offchain inventory snapshot updates with validation rules.
+
+## P2 (system-wide parity)
+
+1. End-to-end combat parity audit: initiative, critical hit behavior, morale, dying/stabilize edge cases.
+2. Spellcasting parity audit (wizard mishaps, priest penalties, focus maintenance).
+3. Economy audit for loot/value scaling vs quickstart baseline and campaign progression targets.
+

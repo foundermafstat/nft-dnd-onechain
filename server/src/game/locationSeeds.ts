@@ -34,6 +34,7 @@ const LOC_WIZARD_SHOP    = '00000000-0000-4000-a000-000000000006';
 const LOC_CASTLE_GATE    = '00000000-0000-4000-a000-000000000007';
 const LOC_OUTSKIRTS      = '00000000-0000-4000-a000-000000000008';
 const LOC_RIVER_CROSSING = '00000000-0000-4000-a000-000000000009';
+const LOC_TAVERN_CELLAR  = '00000000-0000-4000-a000-000000000010';
 
 // ═══════════════════════════════════════════════════════════════════════
 // HAND-CRAFTED INDOOR LOCATIONS
@@ -54,6 +55,7 @@ export const TAVERN_DYING_EMBER: LocationMap = {
     spawn_points: [
         { x: 9, y: 13, label: 'from_south' },
         { x: 10, y: 13, label: 'from_south' },
+        { x: 16, y: 2, label: 'from_cellar' },
     ],
     exits: [
         { tile_x: 9, tile_y: 15, target_location_id: LOC_STREET, target_location_name: 'Castle Street', spawn_label: 'from_north', edge: 'south' },
@@ -76,6 +78,44 @@ export const TAVERN_DYING_EMBER: LocationMap = {
         [W, F, F, F, F, F, W, F, F, C, F, C, F, F, F, F, F, F, F, W],
         [W, W, W, W, W, W, W, W, W, D, D, W, W, W, W, W, W, W, W, W],
         [_, _, _, _, _, _, _, _, _, F, F, _, _, _, _, _, _, _, _, _],
+    ],
+};
+
+/**
+ * 1b. Tavern Cellar — quest-only combat room
+ *    Exit: south -> The Dying Ember
+ */
+export const TAVERN_CELLAR: LocationMap = {
+    id: LOC_TAVERN_CELLAR,
+    name: 'Tavern Cellar',
+    biome_type: 'Ruins',
+    room_type: 'Arena',
+    width: 20,
+    height: 16,
+    threat_level: 2,
+    spawn_points: [
+        { x: 10, y: 2, label: 'from_tavern' },
+    ],
+    exits: [
+        { tile_x: 10, tile_y: 15, target_location_id: LOC_TAVERN, target_location_name: 'The Dying Ember', spawn_label: 'from_cellar', edge: 'south' },
+    ],
+    tiles: [
+        [W, W, W, W, W, W, W, W, W, W, W, W, W, W, W, W, W, W, W, W],
+        [W, F, F, F, F, BR, F, F, F, F, F, F, F, BR, F, F, F, F, F, W],
+        [W, F, F, F, F, F, F, F, F, ST, ST, F, F, F, F, F, F, F, F, W],
+        [W, F, BR, F, F, F, F, F, F, F, F, F, F, F, F, F, F, BR, F, W],
+        [W, F, F, F, F, CR, F, F, F, F, F, F, F, CR, F, F, F, F, F, W],
+        [W, F, F, F, F, F, F, F, C, F, F, C, F, F, F, F, F, F, F, W],
+        [W, F, BR, F, F, F, F, F, F, RG, RG, F, F, F, F, F, F, BR, F, W],
+        [W, F, F, F, F, F, F, F, RG, RG, RG, RG, F, F, F, F, F, F, F, W],
+        [W, F, F, F, F, F, F, F, RG, RG, RG, RG, F, F, F, F, F, F, F, W],
+        [W, F, BR, F, F, F, F, F, F, RG, RG, F, F, F, F, F, F, BR, F, W],
+        [W, F, F, F, F, F, F, F, C, F, F, C, F, F, F, F, F, F, F, W],
+        [W, F, F, F, F, CR, F, F, F, F, F, F, F, CR, F, F, F, F, F, W],
+        [W, F, BR, F, F, F, F, F, F, F, F, F, F, F, F, F, F, BR, F, W],
+        [W, F, F, F, F, BR, F, F, F, F, F, F, F, BR, F, F, F, F, F, W],
+        [W, W, W, W, W, W, W, W, W, W, D, W, W, W, W, W, W, W, W, W],
+        [_, _, _, _, _, _, _, _, _, _, F, _, _, _, _, _, _, _, _, _],
     ],
 };
 
@@ -394,6 +434,7 @@ export const DUNGEON_HOLLOW_CRYPTS: LocationMap = generateLocationMap({
 
 export const ALL_SEED_LOCATIONS: LocationMap[] = [
     TAVERN_DYING_EMBER,
+    TAVERN_CELLAR,
     CASTLE_STREET,
     CHAPEL_OF_ASHES,
     ARCANE_EMPORIUM,

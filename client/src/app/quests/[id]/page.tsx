@@ -63,7 +63,7 @@ export default function QuestLandingPage() {
 
 	if (loading) {
 		return (
-			<main className="flex items-center justify-center h-screen bg-[#0a0806]">
+			<main className="flex h-full items-center justify-center bg-[#0a0806]">
 				<Loader2 className="w-8 h-8 text-amber-600 animate-spin" />
 			</main>
 		);
@@ -71,7 +71,7 @@ export default function QuestLandingPage() {
 
 	if (!quest) {
 		return (
-			<main className="flex flex-col items-center justify-center h-screen bg-[#0a0806] text-stone-400 font-serif">
+			<main className="flex h-full flex-col items-center justify-center bg-[#0a0806] font-serif text-stone-400">
 				<Skull className="w-12 h-12 text-stone-700 mb-4" />
 				<p className="text-lg">This quest has been lost to the void.</p>
 				<Link href="/quests" className="mt-6 text-amber-600 hover:text-amber-400 transition-colors text-sm flex items-center gap-2">
@@ -86,20 +86,21 @@ export default function QuestLandingPage() {
 	const chainEvents = history.filter(h => h.on_chain_event);
 
 	return (
-		<main className="min-h-screen bg-[#0a0806] text-stone-200 overflow-auto custom-scrollbar">
+		<main className="relative h-full overflow-x-hidden overflow-y-auto bg-[#0a0806] text-stone-200 custom-scrollbar">
+			<div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_8%_0%,rgba(214,172,93,0.08),transparent_34%),radial-gradient(circle_at_92%_14%,rgba(102,130,168,0.08),transparent_36%)]" />
 
 			{/* ── Hero Banner ──────────────────────────────────────── */}
-			<div className="relative overflow-hidden">
+			<div className="relative z-10 overflow-hidden">
 				{/* Ambient glow */}
 				<div className={`absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[400px] rounded-full blur-[160px] pointer-events-none ${isSuccess ? 'bg-amber-600/8' : isWiped ? 'bg-red-600/8' : 'bg-stone-600/5'}`} />
 
-				<div className="relative max-w-3xl mx-auto px-6 pt-12 pb-8">
+				<div className="relative mx-auto max-w-5xl px-5 pb-8 pt-10 md:px-8 md:pt-12">
 					<Link href="/quests" className="inline-flex items-center gap-1 text-stone-600 hover:text-amber-500 transition-colors text-xs font-mono uppercase tracking-widest mb-8">
 						<ArrowLeft className="w-3 h-3" /> Chronicle
 					</Link>
 
 					{/* Status Banner */}
-					<div className="flex items-center gap-4 mb-6">
+					<div className="mb-6 flex items-center gap-4">
 						<div className={`w-16 h-16 rounded-xl flex items-center justify-center ${isSuccess ? 'bg-gradient-to-br from-amber-800/30 to-amber-950/30 border border-amber-700/30 shadow-[0_0_30px_rgba(217,119,6,0.1)]' : isWiped ? 'bg-gradient-to-br from-red-900/30 to-red-950/30 border border-red-700/30 shadow-[0_0_30px_rgba(220,38,38,0.1)]' : 'bg-gradient-to-br from-stone-800/30 to-stone-900/30 border border-stone-700/30'}`}>
 							{isSuccess ? <Trophy className="w-8 h-8 text-amber-400" /> : isWiped ? <Skull className="w-8 h-8 text-red-400" /> : <Swords className="w-8 h-8 text-stone-400 animate-pulse" />}
 						</div>
@@ -136,12 +137,12 @@ export default function QuestLandingPage() {
 			</div>
 
 			{/* ── Divider ──────────────────────────────────────────── */}
-			<div className="max-w-3xl mx-auto px-6">
+			<div className="mx-auto max-w-5xl px-5 md:px-8">
 				<div className="h-px bg-gradient-to-r from-transparent via-stone-800 to-transparent" />
 			</div>
 
 			{/* ── Chronicle Timeline ───────────────────────────────── */}
-			<div className="max-w-3xl mx-auto px-6 pt-10 pb-24">
+			<div className="relative z-10 mx-auto max-w-5xl px-5 pb-24 pt-10 md:px-8">
 				<div className="flex items-center gap-2 mb-8">
 					<ScrollText className="w-5 h-5 text-stone-600" />
 					<h2 className="text-lg font-serif font-bold text-stone-400 tracking-wide">Chronicle Timeline</h2>
@@ -174,11 +175,11 @@ export default function QuestLandingPage() {
 														'bg-[#0e0c09] border-stone-800/30 hover:border-stone-700/40'}`}
 										>
 											{/* Timestamp */}
-											<div className="flex items-center justify-between mb-3">
+											<div className="mb-3 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
 												<span className="text-[10px] font-mono text-stone-700 uppercase tracking-widest">
 													Entry {idx + 1} · {new Date(entry.created_at).toLocaleTimeString()}
 												</span>
-												<div className="flex gap-1.5">
+												<div className="flex flex-wrap gap-1.5">
 													<RollBadge roll={entry.player_roll} label="Player" />
 													<RollBadge roll={entry.dm_roll} label="DM" />
 													<EngineTriggerBadge trigger={entry.engine_trigger} />

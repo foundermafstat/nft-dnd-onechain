@@ -1,0 +1,58 @@
+# Shadowdark Rule Manifest (Strict Quickstart v2)
+
+This manifest is the canonical rules baseline for character creation in this repo.
+
+## Scope
+
+- Source text: `promts/shadowdark.md` and `promts/shadowdark_quickstart_extracted.md`
+- Product mode: `Strict Quickstart`
+- Primary stat generation path: server offchain roll (`POST /api/character/roll`)
+- Manual stat tuning path: disabled in UI by default (secondary path)
+
+## Canonical Constants
+
+### Character creation
+
+- `SD-CR-001` Stats: `3d6` per stat (STR/DEX/CON/INT/WIS/CHA)
+- `SD-CR-002` Optional reroll: if no stat is `>= 14`, reroll full set
+- `SD-CR-003` Stat bounds: each stat is `3..18`
+- `SD-CR-004` Start gold: `2d6 * 5 gp`
+- `SD-CR-005` Level at start: `1`
+- `SD-CR-006` XP at start: `0`
+
+### Class and ancestry profile constraints (project strict profile)
+
+- `SD-PROF-001` Fighter: `STR min 12`
+- `SD-PROF-002` Priest: `WIS min 12`
+- `SD-PROF-003` Thief: `DEX min 12`
+- `SD-PROF-004` Wizard: `INT min 12`
+- `SD-PROF-005` Dwarf: `CON min 10`, `DEX max 14`
+- `SD-PROF-006` Elf: `DEX min 10`, `CON max 14`
+- `SD-PROF-007` Goblin: `STR max 12`
+- `SD-PROF-008` Halfling: `STR max 10`
+- `SD-PROF-009` Half-Orc: `STR min 10`, `INT max 14`
+
+### Derived values at creation
+
+- `SD-DER-001` Base AC: `10 + DEX mod`
+- `SD-DER-002` Level-1 HP: `class hit die roll + CON mod`, min `1`, plus Dwarf `+2 HP`
+- `SD-DER-003` Gear slots: `max(STR, 10) + Fighter positive CON mod`
+- `SD-DER-004` Halfling has no slot penalty modifier (slots are attribute-derived)
+
+### Inventory and carry
+
+- `SD-INV-001` First `100` coins are free carry (`0` slots)
+- `SD-INV-002` First backpack is free carry (`0` slots)
+- `SD-INV-003` Most gear uses `1` slot unless explicitly different
+- `SD-INV-004` Starter kits are class-based with explicit quantity and slot overrides for class-kit items
+
+### Progression
+
+- `SD-PROG-001` Level-up threshold: `current level * 10 XP`
+- `SD-PROG-002` Post-adventure onchain progression update: `level/xp/lore_score`
+
+## Snapshot versioning
+
+- `snapshotVersion`: `hero-sbt-v2`
+- `ruleset`: `Shadowdark-Quickstart-Strict-v2`
+

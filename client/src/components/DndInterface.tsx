@@ -7,9 +7,7 @@ import InteractionPanel from './dnd-interface/InteractionPanel';
 import DraggableItem from './dnd-interface/DraggableItem';
 import { useGameState } from '@/store/useGameState';
 import ZkDiceOverlay from './dnd-interface/ZkDiceOverlay';
-import { consumeAdventureDiceRoll, mintInventoryNFTFromPrepay } from '@/lib/OneChain';
-import { SERVER_URL } from '@/lib/config';
-import { useOnechainWalletExecutor } from '@/hooks/useOnechainWalletExecutor';
+import { consumeAdventureDiceRoll } from '@/lib/OneChain';
 
 interface DndInterfaceProps {
     playerId: string;
@@ -18,7 +16,6 @@ interface DndInterfaceProps {
 
 export default function DndInterface({ playerId, walletAddress }: DndInterfaceProps) {
     const { inventory, addToInventory, removeFromInventory, addMessage, testQuestSessionId } = useGameState();
-    const { executor } = useOnechainWalletExecutor();
     const [activeDragId, setActiveDragId] = useState<string | null>(null);
     const [activeDragSource, setActiveDragSource] = useState<'chat' | 'inventory' | null>(null);
 
@@ -46,98 +43,12 @@ export default function DndInterface({ playerId, walletAddress }: DndInterfacePr
         setZkReceipt(null);
 
         if (type === 'ZK_LOOT') {
-            const generateZkRoll = async () => {
-                try {
-                    // Start roll procedure; ZkDiceOverlay handles its own internal steps 1 and 2
-                    // We just await the heavy API call here
-
-                    const testSeed = `Quest-${Date.now()}-Loot`;
-                    let resolvedScore: number;
-
-                    if (testQuestSessionId) {
-                        const roll = await consumeAdventureDiceRoll(testQuestSessionId, 100, walletAddress);
-                        if (!roll.success || !roll.roll) {
-                            throw new Error(roll.error || 'Failed to consume dicepack roll.');
-                        }
-
-                        resolvedScore = roll.roll;
-                        setDiceResult(roll.roll);
-                        setZkReceipt(roll.relayerTxHash || null);
-                    } else {
-                        const response = await fetch(`${SERVER_URL}/api/zk/prove-roll`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ seed: testSeed, bound: 100 })
-                        });
-
-                        if (!response.ok) throw new Error("Failed to generate ZK Proof");
-                        const data = await response.json();
-                        const result = data.result.result;
-                        resolvedScore = result;
-                        setDiceResult(result);
-                        setZkReceipt(data.receipt_base64);
-                    }
-
-                    addMessage({
-                        sender: 'System',
-                        senderType: 'system',
-                        content: `[${testQuestSessionId ? 'DICEPACK' : 'ZK RECEIPT'} VERIFIED] Generated loot score: ${resolvedScore}`,
-                        flavorText: testQuestSessionId
-                            ? 'Relayer consumed a hidden pre-generated roll.'
-                            : 'Verifying off-chain proof payload.'
-                    });
-
-                    if (testQuestSessionId && executor) {
-                        const minted = await mintInventoryNFTFromPrepay({
-                            playerAddress: walletAddress || executor.accountAddress,
-                            adventureId: testQuestSessionId,
-                            name: resolvedScore >= 90 ? 'Mythic Chronicle Relic' : resolvedScore >= 65 ? 'Legendary Chronicle Relic' : 'Epic Chronicle Relic',
-                            rarityTier: resolvedScore >= 90 ? 5 : resolvedScore >= 65 ? 4 : 3,
-                            metadataCid: `loot-meta-${testQuestSessionId}-${resolvedScore}`,
-                            loreCid: `loot-lore-${testQuestSessionId}-${Date.now()}`,
-                        }, executor);
-
-                        if (minted.success) {
-                            const mintedRef = minted.objectId
-                                ? minted.objectId.slice(0, 14)
-                                : minted.hash
-                                    ? minted.hash.slice(0, 14)
-                                    : 'tx';
-                            addMessage({
-                                sender: 'System',
-                                senderType: 'system',
-                                content: `[ONCHAIN MINTED] Loot NFT ${mintedRef}...`,
-                                flavorText: 'Your quest drop is now an onchain item and can be traded in the marketplace.',
-                            });
-                        } else {
-                            addMessage({
-                                sender: 'System',
-                                senderType: 'system',
-                                content: `[ONCHAIN MINT ERROR] ${minted.error || 'Failed to mint loot NFT from prepay.'}`,
-                            });
-                        }
-                    }
-
-                    // Transition quest to completed
-                    const { testQuestState, setTestQuestState } = useGameState.getState();
-                    if (testQuestState === 'combat') {
-                        setTestQuestState('completed');
-
-                        // Final dialog
-                        addMessage({
-                            sender: 'Game Master',
-                            senderType: 'dm',
-                            content: 'You have done well. Your trial is complete. Archive the results and claim your reward.',
-                            flavorText: 'He gestures towards the exit.'
-                        });
-                    }
-                } catch (error) {
-                    console.error("ZK Prove error", error);
-                    setIsRolling(false);
-                }
-            };
-
-            generateZkRoll();
+            addMessage({
+                sender: 'System',
+                senderType: 'system',
+                content: 'ZK loot flow was removed. Use Marta quest turn-in to resolve rewards.',
+            });
+            setTimeout(() => setIsRolling(false), 500);
             return;
         }
 

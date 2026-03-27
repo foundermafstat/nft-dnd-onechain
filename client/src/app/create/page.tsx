@@ -4,7 +4,16 @@ import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import { ChevronDown, ChevronLeft, Minus, Plus, Save, Sparkles } from 'lucide-react';
-import { HeroClass, Ancestry, ANCESTRIES, calculateModifier } from 'shared';
+import {
+  HeroClass,
+  Ancestry,
+  ANCESTRIES,
+  calculateModifier,
+  clampStatsToLimits,
+  getProfileStatLimits,
+  statsMeetLimits,
+  type ShadowdarkStats,
+} from 'shared';
 import { useAuth } from '@/context/AuthContext';
 import { SERVER_URL } from '@/lib/config';
 import { mintHeroSBT } from '@/lib/OneChain';
@@ -15,10 +24,10 @@ import {
   COMMON_LANGUAGES,
   RARE_LANGUAGES,
   DEITIES_BY_ALIGNMENT,
+  QUICKSTART_BACKGROUNDS,
   buildHeroSbtSnapshot,
   defaultDeityForAlignment,
   levelOneTitle,
-  rollStartingGoldGp,
 } from '@/lib/shadowdarkSbt';
 
 const panelClass =
@@ -27,6 +36,7 @@ const inputClass =
   'w-full rounded-xl border border-white/12 bg-black/30 px-4 py-3 text-[0.84rem] text-stone-100 placeholder:text-stone-500 focus:border-amber-400/45 focus:outline-none';
 type HeroGender = 'male' | 'female';
 type CreateStep = 'identity' | 'heritage' | 'combat';
+type StatSource = 'seeded_defaults' | 'offchain_roll' | 'manual_adjust';
 
 const GENDER_OPTIONS: Array<{ value: HeroGender; label: string; iconPath: string }> = [
   { value: 'male', label: 'Male', iconPath: '/game/gender/dnd-male.png' },
@@ -66,14 +76,14 @@ function StatRow({
   value,
   min,
   max,
-  availablePoints,
+  canEdit,
   onChange,
 }: {
   label: string;
   value: number;
   min: number;
   max: number;
-  availablePoints: number;
+  canEdit: boolean;
   onChange: (val: number) => void;
 }) {
   const modifier = calculateModifier(value);
@@ -81,8 +91,8 @@ function StatRow({
   const colorClass =
     modifier > 0 ? 'text-emerald-300' : modifier < 0 ? 'text-rose-300' : 'text-stone-400';
 
-  const canDecrease = value > min;
-  const canIncrease = value < max && availablePoints > 0;
+  const canDecrease = canEdit && value > min;
+  const canIncrease = canEdit && value < max;
 
   return (
     <div className="flex items-center justify-between border-b border-white/8 py-2.5 last:border-b-0">
@@ -133,9 +143,23 @@ export default function CreateHeroPage() {
   const [alignment, setAlignment] = useState<Alignment>('Neutral');
   const [deity, setDeity] = useState<string>(defaultDeityForAlignment('Neutral'));
   const [background, setBackground] = useState('');
-  const [stats, setStats] = useState({ str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 });
+  const [stats, setStats] = useState<ShadowdarkStats>({
+    str: 10,
+    dex: 10,
+    con: 10,
+    int: 10,
+    wis: 10,
+    cha: 10,
+  });
+  const [statsSource, setStatsSource] = useState<StatSource>('seeded_defaults');
   const [isSaving, setIsSaving] = useState(false);
-  const [startingGoldGp] = useState(() => rollStartingGoldGp());
+  const [startingGoldGp, setStartingGoldGp] = useState<number>(0);
+  const [rolledMaxHp, setRolledMaxHp] = useState<number | null>(null);
+  const [rolledArmorClass, setRolledArmorClass] = useState<number | null>(null);
+  const [rollAttempts, setRollAttempts] = useState<number | null>(null);
+  const [rollSource, setRollSource] = useState<string>('not_rolled');
+  const [lastRolledProfile, setLastRolledProfile] = useState<string | null>(null);
+  const [lastRollTimestamp, setLastRollTimestamp] = useState<string | null>(null);
   const [humanExtraLanguage, setHumanExtraLanguage] = useState<string>('Dwarvish');
   const [priestLanguage, setPriestLanguage] = useState<string>('Celestial');
   const [wizardCommonLanguageA, setWizardCommonLanguageA] = useState<string>('Dwarvish');
@@ -147,66 +171,18 @@ export default function CreateHeroPage() {
 
   const [aiPrompt, setAiPrompt] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isRollingStats, setIsRollingStats] = useState(false);
 
-  const TOTAL_POINTS = 72;
+  const MANUAL_STAT_EDIT_ENABLED = false;
 
-  const limits = useMemo(() => {
-    const l = {
-      str: { min: 3, max: 18 },
-      dex: { min: 3, max: 18 },
-      con: { min: 3, max: 18 },
-      int: { min: 3, max: 18 },
-      wis: { min: 3, max: 18 },
-      cha: { min: 3, max: 18 },
-    };
-
-    if (selectedClass === HeroClass.Fighter) l.str.min = 12;
-    if (selectedClass === HeroClass.Priest) l.wis.min = 12;
-    if (selectedClass === HeroClass.Thief) l.dex.min = 12;
-    if (selectedClass === HeroClass.Wizard) l.int.min = 12;
-
-    switch (selectedAncestry) {
-      case Ancestry.Dwarf:
-        l.con.min = Math.max(l.con.min, 10);
-        l.dex.max = Math.min(l.dex.max, 14);
-        break;
-      case Ancestry.Elf:
-        l.dex.min = Math.max(l.dex.min, 10);
-        l.con.max = Math.min(l.con.max, 14);
-        break;
-      case Ancestry.Goblin:
-        l.str.max = Math.min(l.str.max, 12);
-        break;
-      case Ancestry.Halfling:
-        l.str.max = Math.min(l.str.max, 10);
-        break;
-      case Ancestry.HalfOrc:
-        l.str.min = Math.max(l.str.min, 10);
-        l.int.max = Math.min(l.int.max, 14);
-        break;
-      case Ancestry.Human:
-        break;
-    }
-
-    return l;
-  }, [selectedAncestry, selectedClass]);
+  const limits = useMemo(
+    () => getProfileStatLimits(selectedClass, selectedAncestry),
+    [selectedAncestry, selectedClass]
+  );
 
   useEffect(() => {
     setStats((prev) => {
-      const next = { ...prev };
-      let changed = false;
-
-      for (const key of Object.keys(next) as Array<keyof typeof next>) {
-        if (next[key] < limits[key].min) {
-          next[key] = limits[key].min;
-          changed = true;
-        }
-        if (next[key] > limits[key].max) {
-          next[key] = limits[key].max;
-          changed = true;
-        }
-      }
-
+      const { stats: next, changed } = clampStatsToLimits(prev, limits);
       return changed ? next : prev;
     });
   }, [limits]);
@@ -224,8 +200,25 @@ export default function CreateHeroPage() {
     }
   }, [alignment, deity]);
 
-  const currentPoints = Object.values(stats).reduce((a, b) => a + b, 0);
-  const availablePoints = TOTAL_POINTS - currentPoints;
+  const activeProfileKey = `${selectedClass}:${selectedAncestry}`;
+  const hasFreshStrictRoll = lastRolledProfile === activeProfileKey;
+  const statsWithinLimits = statsMeetLimits(stats, limits);
+  const strictRollReady =
+    hasFreshStrictRoll &&
+    statsWithinLimits &&
+    rolledMaxHp !== null &&
+    rolledArmorClass !== null &&
+    startingGoldGp > 0;
+  const strictRollStale = Boolean(lastRolledProfile) && !hasFreshStrictRoll;
+  useEffect(() => {
+    if (lastRolledProfile && lastRolledProfile !== activeProfileKey) {
+      setRolledMaxHp(null);
+      setRolledArmorClass(null);
+      setStartingGoldGp(0);
+      setRollSource('stale_profile_mismatch');
+    }
+  }, [activeProfileKey, lastRolledProfile]);
+
   const heroMintQuote = quoteHeroMintCost();
   const titleAtLevelOne = levelOneTitle(selectedClass, alignment);
   const creationSteps: Array<{ key: CreateStep; label: string; hint: string }> = [
@@ -234,7 +227,10 @@ export default function CreateHeroPage() {
     { key: 'combat', label: 'Loadout', hint: 'Stats and arcana' },
   ];
   const activeStepIndex = creationSteps.findIndex((step) => step.key === activeStep);
-  const canProceedToForge = availablePoints === 0 && Boolean(name.trim()) && Boolean(executor);
+  const canProceedToForge =
+    Boolean(name.trim()) &&
+    Boolean(executor) &&
+    strictRollReady;
   const previewKnownSpells = knownSpellsInput
     .split(',')
     .map((value) => value.trim())
@@ -243,9 +239,56 @@ export default function CreateHeroPage() {
     .split(',')
     .map((value) => value.trim())
     .filter(Boolean);
+  const previewFallbackHp =
+    selectedClass === HeroClass.Fighter ? 8 : selectedClass === HeroClass.Priest ? 6 : 4;
+  const previewMaxHp =
+    rolledMaxHp ??
+    (Math.max(1, previewFallbackHp + calculateModifier(stats.con)) +
+      (selectedAncestry === Ancestry.Dwarf ? 2 : 0));
+  const previewArmorClass = rolledArmorClass ?? 10 + calculateModifier(stats.dex);
+  const previewSbtSnapshot = useMemo(
+    () =>
+      buildHeroSbtSnapshot({
+        heroClass: selectedClass,
+        ancestry: selectedAncestry,
+        alignment,
+        deity,
+        background,
+        stats,
+        maxHp: previewMaxHp,
+        armorClass: previewArmorClass,
+        startingGoldGp,
+        humanExtraLanguage,
+        priestLanguage,
+        wizardCommonLanguages: [wizardCommonLanguageA, wizardCommonLanguageB],
+        wizardRareLanguages: [wizardRareLanguageA, wizardRareLanguageB],
+        knownSpells: previewKnownSpells,
+        extraTalents: previewTalents,
+      }),
+    [
+      selectedClass,
+      selectedAncestry,
+      alignment,
+      deity,
+      background,
+      stats,
+      previewMaxHp,
+      previewArmorClass,
+      startingGoldGp,
+      humanExtraLanguage,
+      priestLanguage,
+      wizardCommonLanguageA,
+      wizardCommonLanguageB,
+      wizardRareLanguageA,
+      wizardRareLanguageB,
+      previewKnownSpells,
+      previewTalents,
+    ]
+  );
 
   const handleStatChange = (stat: keyof typeof stats, value: number) => {
     setStats((prev) => ({ ...prev, [stat]: value }));
+    setStatsSource('manual_adjust');
   };
 
   const generateWithAI = async () => {
@@ -284,16 +327,6 @@ export default function CreateHeroPage() {
           setAlignment(character.alignment as Alignment);
         }
         if (character.background) setBackground(character.background);
-        if (character.stats) {
-          setStats({
-            str: character.stats.str || 10,
-            dex: character.stats.dex || 10,
-            con: character.stats.con || 10,
-            int: character.stats.int || 10,
-            wis: character.stats.wis || 10,
-            cha: character.stats.cha || 10,
-          });
-        }
       }
     } catch (error) {
       console.error(error);
@@ -303,13 +336,62 @@ export default function CreateHeroPage() {
     }
   };
 
+  const rollStatsOffchain = async () => {
+    setIsRollingStats(true);
+    try {
+      const response = await fetch(`${SERVER_URL}/api/character/roll`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ class: selectedClass, ancestry: selectedAncestry }),
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload?.stats) {
+        throw new Error(payload?.error || 'Failed to roll offchain stats');
+      }
+      const rolledStats: ShadowdarkStats = {
+        str: payload.stats.str ?? 10,
+        dex: payload.stats.dex ?? 10,
+        con: payload.stats.con ?? 10,
+        int: payload.stats.int ?? 10,
+        wis: payload.stats.wis ?? 10,
+        cha: payload.stats.cha ?? 10,
+      };
+      setStats(rolledStats);
+      setStatsSource('offchain_roll');
+      setRollAttempts(typeof payload?.attempts === 'number' ? payload.attempts : null);
+      setRollSource(payload?.source || 'offchain_roll');
+      setLastRolledProfile(activeProfileKey);
+      setLastRollTimestamp(new Date().toISOString());
+      setRolledMaxHp(
+        typeof payload?.derived?.hitPoints?.total === 'number' ? payload.derived.hitPoints.total : null
+      );
+      setRolledArmorClass(
+        typeof payload?.derived?.armorClass === 'number' ? payload.derived.armorClass : null
+      );
+      setStartingGoldGp(
+        typeof payload?.derived?.startingGold?.totalGp === 'number'
+          ? payload.derived.startingGold.totalGp
+          : 0
+      );
+    } catch (error: any) {
+      console.error(error);
+      alert(error?.message || 'Failed to roll offchain stats');
+    } finally {
+      setIsRollingStats(false);
+    }
+  };
+
   const handleSave = async () => {
     if (!name.trim()) {
       alert('Hero Name is required.');
       return;
     }
-    if (availablePoints !== 0) {
-      alert('You must allocate all attribute points.');
+    if (!hasFreshStrictRoll) {
+      alert('Roll strict offchain stats for the current class and ancestry before forging.');
+      return;
+    }
+    if (!statsWithinLimits) {
+      alert('Current stats do not satisfy strict class/ancestry limits.');
       return;
     }
     if (!walletAddress) {
@@ -321,15 +403,13 @@ export default function CreateHeroPage() {
       return;
     }
 
-    let baseHp = 4;
-    if (selectedClass === HeroClass.Fighter) baseHp = 8;
-    if (selectedClass === HeroClass.Priest) baseHp = 6;
+    if (rolledMaxHp === null || rolledArmorClass === null || startingGoldGp <= 0) {
+      alert('Strict roll metadata is incomplete. Roll again before forging.');
+      return;
+    }
 
-    const conMod = calculateModifier(stats.con);
-    let maxHp = Math.max(1, baseHp + conMod);
-    if (selectedAncestry === Ancestry.Dwarf) maxHp += 2;
-
-    const ac = 10 + calculateModifier(stats.dex);
+    const maxHp = rolledMaxHp;
+    const ac = rolledArmorClass;
     const alignmentDeities = DEITIES_BY_ALIGNMENT[alignment];
     if (selectedClass === HeroClass.Priest && !alignmentDeities.includes(deity)) {
       alert('Priest deity must match current alignment.');
@@ -397,6 +477,15 @@ export default function CreateHeroPage() {
               gender: selectedGender,
               portrait: getAncestryImagePath(selectedAncestry, selectedGender),
             },
+            creation: {
+              mode: 'strict_quickstart',
+              statsSource: rollSource,
+              rolledAt: lastRollTimestamp,
+              rollAttempts,
+              profileKey: activeProfileKey,
+              limits,
+              statsOrigin: statsSource,
+            },
             onchain: {
               heroSbtMintHash: mintResult.hash,
               heroMintPaidOne: mintResult.paidOne,
@@ -410,6 +499,15 @@ export default function CreateHeroPage() {
       if (!response.ok) {
         const err = await response.json();
         throw new Error(err.error || 'Failed to create character');
+      }
+
+      const createPayload = await response.json();
+      const createdCharacterId = createPayload?.character?.id;
+      if (createdCharacterId) {
+        await fetch(`${SERVER_URL}/api/character/${createdCharacterId}/inventory/ensure-starter-kit`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+        });
       }
 
       router.push('/game');
@@ -554,6 +652,32 @@ export default function CreateHeroPage() {
                     <label className="mb-2 block text-[0.65rem] uppercase tracking-[0.22em] text-stone-400">
                       Background
                     </label>
+                    <div className="mb-2 flex flex-wrap gap-2">
+                      <button
+                        onClick={() =>
+                          setBackground(
+                            QUICKSTART_BACKGROUNDS[
+                              Math.floor(Math.random() * QUICKSTART_BACKGROUNDS.length)
+                            ]
+                          )
+                        }
+                        className="rounded-md border border-white/12 px-2.5 py-1 text-[0.62rem] uppercase tracking-[0.14em] text-stone-300 transition hover:border-white/25"
+                      >
+                        Roll Random
+                      </button>
+                      <select
+                        value={background}
+                        onChange={(e) => setBackground(e.target.value)}
+                        className="min-w-[260px] rounded-md border border-white/12 bg-black/35 px-2.5 py-1 text-[0.72rem] text-stone-200 focus:border-amber-300/45 focus:outline-none"
+                      >
+                        <option value="">Choose quickstart background...</option>
+                        {QUICKSTART_BACKGROUNDS.map((item) => (
+                          <option key={item} value={item}>
+                            {item}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                     <textarea
                       value={background}
                       onChange={(e) => setBackground(e.target.value)}
@@ -681,22 +805,53 @@ export default function CreateHeroPage() {
 
               {activeStep === 'combat' && (
                 <div className="space-y-5">
+                  <div className="rounded-xl border border-white/10 bg-black/30 p-3 text-[0.68rem] leading-5 text-stone-400">
+                    <p className="mb-1 uppercase tracking-[0.14em] text-stone-500">Quickstart Constraints</p>
+                    <p>Strict mode: server rolls 3d6 for each stat. If no stat is 14+, roll again.</p>
+                    <p>
+                      Current mins: STR {limits.str.min}, DEX {limits.dex.min}, CON {limits.con.min}, INT{' '}
+                      {limits.int.min}, WIS {limits.wis.min}, CHA {limits.cha.min}.
+                    </p>
+                    <p>Gear slots formula: max(STR, 10) + Fighter CON modifier (if positive).</p>
+                    <p>
+                      Roll status:{' '}
+                      {strictRollReady
+                        ? 'ready for mint'
+                        : strictRollStale
+                          ? 'stale (profile changed, reroll required)'
+                          : 'awaiting strict offchain roll'}
+                      {rollAttempts ? ` · attempts: ${rollAttempts}` : ''}
+                    </p>
+                    <p>
+                      Source: {rollSource}
+                      {lastRollTimestamp ? ` · rolled at ${new Date(lastRollTimestamp).toLocaleString()}` : ''}
+                    </p>
+                    <p>
+                      Manual stat edit: {MANUAL_STAT_EDIT_ENABLED ? 'enabled (secondary mode)' : 'disabled (strict)'}
+                    </p>
+                    <div className="mt-2">
+                      <button
+                        onClick={rollStatsOffchain}
+                        disabled={isRollingStats}
+                        className="rounded-md border border-amber-300/40 bg-amber-300/[0.1] px-3 py-1.5 text-[0.62rem] uppercase tracking-[0.14em] text-amber-100 transition hover:bg-amber-300/[0.16] disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {isRollingStats ? 'Rolling...' : 'Roll Stats Offchain (3d6)'}
+                      </button>
+                    </div>
+                  </div>
+
                   <div className="flex items-center justify-between">
                     <h2 className="font-cinzel text-lg uppercase tracking-[0.14em] text-stone-100">Attributes</h2>
                     <span
                       className={`rounded-full border px-2.5 py-1 text-[0.62rem] uppercase tracking-[0.16em] ${
-                        availablePoints > 0
-                          ? 'border-amber-300/35 bg-amber-300/[0.08] text-amber-200'
-                          : availablePoints < 0
+                        strictRollReady
+                          ? 'border-emerald-300/35 bg-emerald-300/[0.08] text-emerald-200'
+                          : strictRollStale
                             ? 'border-rose-300/35 bg-rose-300/[0.08] text-rose-200'
-                            : 'border-emerald-300/35 bg-emerald-300/[0.08] text-emerald-200'
+                            : 'border-amber-300/35 bg-amber-300/[0.08] text-amber-200'
                       }`}
                     >
-                      {availablePoints > 0
-                        ? `${availablePoints} left`
-                        : availablePoints < 0
-                          ? `${Math.abs(availablePoints)} over`
-                          : 'complete'}
+                      {strictRollReady ? 'strict roll ready' : strictRollStale ? 'reroll required' : 'not rolled'}
                     </span>
                   </div>
                   <div className="rounded-xl border border-white/10 bg-black/25 px-4">
@@ -705,7 +860,7 @@ export default function CreateHeroPage() {
                       value={stats.str}
                       min={limits.str.min}
                       max={limits.str.max}
-                      availablePoints={availablePoints}
+                      canEdit={MANUAL_STAT_EDIT_ENABLED}
                       onChange={(v) => handleStatChange('str', v)}
                     />
                     <StatRow
@@ -713,7 +868,7 @@ export default function CreateHeroPage() {
                       value={stats.dex}
                       min={limits.dex.min}
                       max={limits.dex.max}
-                      availablePoints={availablePoints}
+                      canEdit={MANUAL_STAT_EDIT_ENABLED}
                       onChange={(v) => handleStatChange('dex', v)}
                     />
                     <StatRow
@@ -721,7 +876,7 @@ export default function CreateHeroPage() {
                       value={stats.con}
                       min={limits.con.min}
                       max={limits.con.max}
-                      availablePoints={availablePoints}
+                      canEdit={MANUAL_STAT_EDIT_ENABLED}
                       onChange={(v) => handleStatChange('con', v)}
                     />
                     <StatRow
@@ -729,7 +884,7 @@ export default function CreateHeroPage() {
                       value={stats.int}
                       min={limits.int.min}
                       max={limits.int.max}
-                      availablePoints={availablePoints}
+                      canEdit={MANUAL_STAT_EDIT_ENABLED}
                       onChange={(v) => handleStatChange('int', v)}
                     />
                     <StatRow
@@ -737,7 +892,7 @@ export default function CreateHeroPage() {
                       value={stats.wis}
                       min={limits.wis.min}
                       max={limits.wis.max}
-                      availablePoints={availablePoints}
+                      canEdit={MANUAL_STAT_EDIT_ENABLED}
                       onChange={(v) => handleStatChange('wis', v)}
                     />
                     <StatRow
@@ -745,7 +900,7 @@ export default function CreateHeroPage() {
                       value={stats.cha}
                       min={limits.cha.min}
                       max={limits.cha.max}
-                      availablePoints={availablePoints}
+                      canEdit={MANUAL_STAT_EDIT_ENABLED}
                       onChange={(v) => handleStatChange('cha', v)}
                     />
                   </div>
@@ -965,15 +1120,7 @@ export default function CreateHeroPage() {
                     Level 1 {titleAtLevelOne} · {selectedGender} {selectedAncestry} {selectedClass}
                   </p>
                   <p className="text-[0.72rem] text-stone-400">
-                    Alignment: {alignment} · Deity: {deity} · AC: {10 + calculateModifier(stats.dex)} · HP:{' '}
-                    {Math.max(
-                      1,
-                      (selectedClass === HeroClass.Fighter
-                        ? 8
-                        : selectedClass === HeroClass.Priest
-                          ? 6
-                          : 4) + calculateModifier(stats.con)
-                    ) + (selectedAncestry === Ancestry.Dwarf ? 2 : 0)}
+                    Alignment: {alignment} · Deity: {deity} · AC: {previewArmorClass} · HP: {previewMaxHp}
                   </p>
 
                   <div className="grid grid-cols-3 gap-2 rounded-xl border border-white/10 bg-black/30 p-2">
@@ -991,9 +1138,29 @@ export default function CreateHeroPage() {
                   <p className="text-[0.66rem] uppercase tracking-[0.16em] text-stone-500">
                     Languages:{' '}
                     <span className="normal-case tracking-normal text-stone-300">
-                      {ANCESTRIES[selectedAncestry].languages.join(', ')}
+                      {previewSbtSnapshot.languages.join(', ')}
                     </span>
                   </p>
+
+                  <div className="rounded-xl border border-white/10 bg-black/25 p-3">
+                    <p className="text-[0.63rem] uppercase tracking-[0.16em] text-stone-500">
+                      Inventory Slots: {previewSbtSnapshot.gearSlots} total ·{' '}
+                      {previewSbtSnapshot.gearSlotsUsed} used · {previewSbtSnapshot.gearSlotsFree} free
+                    </p>
+                    <div className="mt-2 space-y-1.5">
+                      {previewSbtSnapshot.starterInventory.map((item) => (
+                        <div key={item.key} className="flex items-center justify-between text-[0.7rem] text-stone-300">
+                          <span>
+                            {item.name} x{item.quantity}
+                          </span>
+                          <span className="text-stone-500">{item.totalSlots} slots</span>
+                        </div>
+                      ))}
+                    </div>
+                    <p className="mt-2 text-[0.62rem] text-stone-500">
+                      Carry rules: {previewSbtSnapshot.commonCarryRules.join(' ')}
+                    </p>
+                  </div>
 
                   {previewKnownSpells.length > 0 && (
                     <p className="text-[0.66rem] uppercase tracking-[0.16em] text-stone-500">
@@ -1011,6 +1178,10 @@ export default function CreateHeroPage() {
                       </span>
                     </p>
                   )}
+
+                  <p className="text-[0.62rem] uppercase tracking-[0.14em] text-stone-600">
+                    SBT Snapshot: {previewSbtSnapshot.snapshotVersion} · {previewSbtSnapshot.ruleset}
+                  </p>
 
                   <div className="rounded-xl border border-amber-300/25 bg-amber-300/[0.08] px-3 py-2 text-[0.68rem] uppercase tracking-[0.14em] text-amber-100/90">
                     Hero SBT mint: {heroMintQuote.totalOne} ONE (incl. gas buffer)

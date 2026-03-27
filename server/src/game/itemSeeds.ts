@@ -38,7 +38,7 @@ const GEAR: ItemSeed[] = [
         category: 'Gear',
         subcategory: 'LightSource',
         rarity: 'Common',
-        cost_gp: 0,
+        cost_gp: 0.5,
         slots: 1,
         stats: { duration_seconds: 3600, light_range: 'Near', description: 'Burns for 1 hour real time. Illuminates Near distance.' },
         bonuses: {},
@@ -53,7 +53,7 @@ const GEAR: ItemSeed[] = [
         category: 'Gear',
         subcategory: 'LightSource',
         rarity: 'Common',
-        cost_gp: 10,
+        cost_gp: 5,
         slots: 1,
         stats: { duration_seconds: 3600, light_range: 'DoubleNear', description: 'Requires oil flask. Illuminates double Near distance.' },
         bonuses: {},
@@ -68,7 +68,7 @@ const GEAR: ItemSeed[] = [
         category: 'Gear',
         subcategory: 'Consumable',
         rarity: 'Common',
-        cost_gp: 0,
+        cost_gp: 0.5,
         slots: 1,
         stats: { uses: 1, description: 'Fuel for lantern or throw as weapon (Near range, 1d6 fire damage on hit).' },
         bonuses: {},
@@ -83,7 +83,7 @@ const GEAR: ItemSeed[] = [
         category: 'Gear',
         subcategory: 'Consumable',
         rarity: 'Common',
-        cost_gp: 0,
+        cost_gp: 0.5,
         slots: 1,
         stats: { uses: 3, description: 'Food for 3 days. One slot holds 3 days of rations.' },
         bonuses: {},
@@ -128,7 +128,7 @@ const GEAR: ItemSeed[] = [
         category: 'Gear',
         subcategory: 'Tool',
         rarity: 'Common',
-        cost_gp: 1,
+        cost_gp: 0.5,
         slots: 1,
         stats: { description: 'Advantage on STR checks to force open doors, chests, and lids.' },
         bonuses: {},
@@ -158,7 +158,7 @@ const GEAR: ItemSeed[] = [
         category: 'Gear',
         subcategory: 'Tool',
         rarity: 'Common',
-        cost_gp: 1,
+        cost_gp: 0.5,
         slots: 1,
         stats: { description: 'Covers Close area. Creatures entering must DEX check DC 12 or take 1d4 damage and half move speed.' },
         bonuses: {},
@@ -173,7 +173,7 @@ const GEAR: ItemSeed[] = [
         category: 'Gear',
         subcategory: 'Tool',
         rarity: 'Common',
-        cost_gp: 0,
+        cost_gp: 0.5,
         slots: 1,
         stats: { description: 'Poke suspicious floors, trigger traps safely from a distance.' },
         bonuses: {},
@@ -188,7 +188,7 @@ const GEAR: ItemSeed[] = [
         category: 'Gear',
         subcategory: 'Consumable',
         rarity: 'Common',
-        cost_gp: 0,
+        cost_gp: 0.5,
         slots: 1,
         stats: { uses: 1, description: 'Holds enough water for 1 day.' },
         bonuses: {},
@@ -233,7 +233,7 @@ const GEAR: ItemSeed[] = [
         category: 'Gear',
         subcategory: 'Tool',
         rarity: 'Common',
-        cost_gp: 0,
+        cost_gp: 0.5,
         slots: 1,
         stats: { description: 'Start fires and light torches. Essential survival gear.' },
         bonuses: {},
@@ -286,7 +286,7 @@ const WEAPONS: ItemSeed[] = [
         category: 'Weapon',
         subcategory: 'Melee',
         rarity: 'Common',
-        cost_gp: 3,
+        cost_gp: 1,
         slots: 1,
         stats: { damage: '1d4', range: 'Close', properties: ['Finesse', 'Thrown'] },
         bonuses: {},
@@ -301,7 +301,7 @@ const WEAPONS: ItemSeed[] = [
         category: 'Weapon',
         subcategory: 'Melee',
         rarity: 'Common',
-        cost_gp: 0,
+        cost_gp: 0.05,
         slots: 1,
         stats: { damage: '1d4', range: 'Close', properties: [] },
         bonuses: {},
@@ -316,7 +316,7 @@ const WEAPONS: ItemSeed[] = [
         category: 'Weapon',
         subcategory: 'Melee',
         rarity: 'Common',
-        cost_gp: 0,
+        cost_gp: 0.5,
         slots: 1,
         stats: { damage: '1d4', range: 'Close', properties: ['TwoHanded'] },
         bonuses: {},
@@ -361,7 +361,7 @@ const WEAPONS: ItemSeed[] = [
         category: 'Weapon',
         subcategory: 'Melee',
         rarity: 'Common',
-        cost_gp: 1,
+        cost_gp: 0.5,
         slots: 1,
         stats: { damage: '1d6', range: 'Close', properties: ['Versatile', 'Thrown'], versatile_damage: '1d8' },
         bonuses: {},
@@ -391,7 +391,7 @@ const WEAPONS: ItemSeed[] = [
         category: 'Weapon',
         subcategory: 'Melee',
         rarity: 'Common',
-        cost_gp: 15,
+        cost_gp: 10,
         slots: 1,
         stats: { damage: '1d8', range: 'Close', properties: ['Versatile'], versatile_damage: '1d10' },
         bonuses: {},
@@ -406,7 +406,7 @@ const WEAPONS: ItemSeed[] = [
         category: 'Weapon',
         subcategory: 'Melee',
         rarity: 'Common',
-        cost_gp: 15,
+        cost_gp: 9,
         slots: 1,
         stats: { damage: '1d8', range: 'Close', properties: ['Versatile'], versatile_damage: '1d10' },
         bonuses: {},
@@ -436,7 +436,7 @@ const WEAPONS: ItemSeed[] = [
         category: 'Weapon',
         subcategory: 'Melee',
         rarity: 'Common',
-        cost_gp: 50,
+        cost_gp: 12,
         slots: 2,
         stats: { damage: '1d12', range: 'Close', properties: ['TwoHanded'] },
         bonuses: {},
@@ -451,7 +451,7 @@ const WEAPONS: ItemSeed[] = [
         category: 'Weapon',
         subcategory: 'Melee',
         rarity: 'Common',
-        cost_gp: 30,
+        cost_gp: 10,
         slots: 2,
         stats: { damage: '1d10', range: 'Close', properties: ['TwoHanded'] },
         bonuses: {},
@@ -468,7 +468,7 @@ const WEAPONS: ItemSeed[] = [
         category: 'Weapon',
         subcategory: 'Ranged',
         rarity: 'Common',
-        cost_gp: 25,
+        cost_gp: 6,
         slots: 1,
         stats: { damage: '1d4', range: 'Far', properties: ['TwoHanded'] },
         bonuses: {},
@@ -483,7 +483,7 @@ const WEAPONS: ItemSeed[] = [
         category: 'Weapon',
         subcategory: 'Ranged',
         rarity: 'Common',
-        cost_gp: 50,
+        cost_gp: 8,
         slots: 1,
         stats: { damage: '1d8', range: 'Far', properties: ['TwoHanded'] },
         bonuses: {},
@@ -498,7 +498,7 @@ const WEAPONS: ItemSeed[] = [
         category: 'Weapon',
         subcategory: 'Ranged',
         rarity: 'Common',
-        cost_gp: 25,
+        cost_gp: 8,
         slots: 1,
         stats: { damage: '1d6', range: 'Far', properties: ['TwoHanded', 'Loading'] },
         bonuses: {},
@@ -868,38 +868,44 @@ const MAGIC: ItemSeed[] = [
 // CLASS STARTER KITS — default items given to each class
 // ═══════════════════════════════════════════════════════════════════
 
-export const CLASS_STARTER_ITEMS: Record<string, string[]> = {
+export interface StarterKitTemplateEntry {
+    templateId: string;
+    quantity?: number;
+    slotOverride?: number;
+}
+
+export const CLASS_STARTER_ITEMS: Record<string, StarterKitTemplateEntry[]> = {
     Fighter: [
-        '20000000-0000-4000-a000-000000000109', // Longsword
-        '20000000-0000-4000-a000-000000000204', // Shield
-        '20000000-0000-4000-a000-000000000201', // Leather Armor
-        '20000000-0000-4000-a000-000000000001', // Torch x2
-        '20000000-0000-4000-a000-000000000004', // Rations
-        '20000000-0000-4000-a000-000000000005', // Rope
+        { templateId: '20000000-0000-4000-a000-000000000109' }, // Longsword
+        { templateId: '20000000-0000-4000-a000-000000000204' }, // Shield
+        { templateId: '20000000-0000-4000-a000-000000000201' }, // Leather Armor
+        { templateId: '20000000-0000-4000-a000-000000000001', quantity: 2 }, // Torch x2
+        { templateId: '20000000-0000-4000-a000-000000000004' }, // Rations
+        { templateId: '20000000-0000-4000-a000-000000000005' }, // Rope
     ],
     Priest: [
-        '20000000-0000-4000-a000-000000000107', // Mace
-        '20000000-0000-4000-a000-000000000204', // Shield
-        '20000000-0000-4000-a000-000000000201', // Leather Armor
-        '20000000-0000-4000-a000-000000000015', // Holy Symbol
-        '20000000-0000-4000-a000-000000000001', // Torch
-        '20000000-0000-4000-a000-000000000004', // Rations
+        { templateId: '20000000-0000-4000-a000-000000000107' }, // Mace
+        { templateId: '20000000-0000-4000-a000-000000000204' }, // Shield
+        { templateId: '20000000-0000-4000-a000-000000000201' }, // Leather Armor
+        { templateId: '20000000-0000-4000-a000-000000000015', slotOverride: 0 }, // Holy Symbol
+        { templateId: '20000000-0000-4000-a000-000000000001' }, // Torch
+        { templateId: '20000000-0000-4000-a000-000000000004' }, // Rations
     ],
     Thief: [
-        '20000000-0000-4000-a000-000000000104', // Shortsword
-        '20000000-0000-4000-a000-000000000101', // Dagger
-        '20000000-0000-4000-a000-000000000201', // Leather Armor
-        '20000000-0000-4000-a000-000000000013', // Thieves' Tools
-        '20000000-0000-4000-a000-000000000005', // Rope
-        '20000000-0000-4000-a000-000000000001', // Torch
+        { templateId: '20000000-0000-4000-a000-000000000104' }, // Shortsword
+        { templateId: '20000000-0000-4000-a000-000000000101' }, // Dagger
+        { templateId: '20000000-0000-4000-a000-000000000201' }, // Leather Armor
+        { templateId: '20000000-0000-4000-a000-000000000013', slotOverride: 0 }, // Thieves' Tools
+        { templateId: '20000000-0000-4000-a000-000000000005' }, // Rope
+        { templateId: '20000000-0000-4000-a000-000000000001' }, // Torch
     ],
     Wizard: [
-        '20000000-0000-4000-a000-000000000103', // Staff
-        '20000000-0000-4000-a000-000000000101', // Dagger
-        '20000000-0000-4000-a000-000000000016', // Spellbook
-        '20000000-0000-4000-a000-000000000310', // Scroll of Magic Missile
-        '20000000-0000-4000-a000-000000000001', // Torch
-        '20000000-0000-4000-a000-000000000004', // Rations
+        { templateId: '20000000-0000-4000-a000-000000000103' }, // Staff
+        { templateId: '20000000-0000-4000-a000-000000000101' }, // Dagger
+        { templateId: '20000000-0000-4000-a000-000000000016' }, // Spellbook
+        { templateId: '20000000-0000-4000-a000-000000000310' }, // Scroll of Magic Missile
+        { templateId: '20000000-0000-4000-a000-000000000001' }, // Torch
+        { templateId: '20000000-0000-4000-a000-000000000004' }, // Rations
     ],
 };
 
